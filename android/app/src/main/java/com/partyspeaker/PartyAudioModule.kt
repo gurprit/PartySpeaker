@@ -20,6 +20,7 @@ import android.os.Handler
 import android.util.Base64
 import java.io.File
 import java.io.FileOutputStream
+import java.net.NetworkInterface
 import android.os.Looper
 import android.provider.OpenableColumns
 import androidx.core.content.ContextCompat
@@ -157,6 +158,34 @@ class PartyAudioModule(
             null
         } finally {
             cursor?.close()
+        }
+    }
+
+
+    @ReactMethod
+    fun getLocalIpAddress(promise: Promise) {
+        try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+
+            for (networkInterface in interfaces) {
+                val addresses = networkInterface.inetAddresses
+
+                for (address in addresses) {
+                    val hostAddress = address.hostAddress ?: continue
+
+                    if (!address.isLoopbackAddress &&
+                        hostAddress.contains(".") &&
+                        !hostAddress.startsWith("169.254")
+                    ) {
+                        promise.resolve(hostAddress)
+                        return
+                    }
+                }
+            }
+
+            promise.resolve("Unknown")
+        } catch (error: Exception) {
+            promise.reject("GET_IP_ERROR", error)
         }
     }
 

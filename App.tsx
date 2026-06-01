@@ -48,6 +48,9 @@ export default function App() {
   const [captureStatus, setCaptureStatus] = useState('Not running');
   const [captureLevel, setCaptureLevel] = useState(0);
   const [showDebugTools, setShowDebugTools] = useState(false);
+  const [showNodeDebugTools, setShowNodeDebugTools] = useState(false);
+  const [hostLocalIp, setHostLocalIp] = useState('Unknown');
+  const [partyCode, setPartyCode] = useState('');
   const [playlistSyncedNodeCount, setPlaylistSyncedNodeCount] = useState(0);
   const [lastPlaylistSyncTime, setLastPlaylistSyncTime] = useState('Never');
 
@@ -61,8 +64,11 @@ export default function App() {
   const udpHostRef = useRef<any>(null);
   const broadcastTimerRef = useRef<any>(null);
   const countdownTimerRef = useRef<any>(null);
+  const transferBuffersRef = useRef<Record<string, {name: string; chunks: string[]}>>({});
 
   useEffect(() => {
+    refreshHostAddress();
+
     const eventEmitter = new NativeEventEmitter(PartyAudio);
 
     const levelSub = eventEmitter.addListener('partyAudioCaptureLevel', event => {
@@ -82,6 +88,27 @@ export default function App() {
   const addLog = (message: string) => {
     const time = new Date().toLocaleTimeString();
     setLog(previous => [`${time}  ${message}`, ...previous].slice(0, 14));
+  };
+
+  const writeSocket = (socket: any, message: string) => {
+    socket.write(`${message}\n`);
+  };
+
+  const refreshHostAddress = async () => {
+    try {
+      const ip = await PartyAudio.getLocalIpAddress();
+      setHostLocalIp(ip || 'Unknown');
+
+      if (ip && typeof ip === 'string' && ip.includes('.')) {
+        const lastPart = ip.split('.').pop() || '';
+        setPartyCode(lastPart);
+      }
+
+      return ip;
+    } catch (error) {
+      addLog(`Could not get host IP: ${String(error)}`);
+      return 'Unknown';
+    }
   };
 
   const getSelectedTrack = () => {
@@ -243,7 +270,9 @@ export default function App() {
     }, delay);
   };
 
-  const startHostServer = () => {
+  const startHostServer = async () => {
+    await refreshHostAddress();
+
     if (serverRef.current) {
       setStatus('Host server already running');
       return;
@@ -255,17 +284,38 @@ export default function App() {
       setStatus('Node connected');
       addLog('Node connected');
 
-      socket.write('WELCOME_FROM_HOST');
+      writeSocket(socket, 'WELCOME_FROM_HOST');
 
       socket.on('data', data => {
-        const message = data.toString();
-        setLastMessage(message);
-        addLog(`Node says: ${message}`);
+        socket._partyBuffer = `${socket._partyBuffer || ''}${data.toString()}`;
+        const lines = socket._partyBuffer.split('\n');
+        socket._partyBuffer = lines.pop() || '';
 
-        if (message === 'PLAYLIST_RECEIVED') {
-          setPlaylistSyncedNodeCount(previous => previous + 1);
-          addLog('Node confirmed playlist sync');
-        }
+        lines.forEach((message: string) => {
+          if (!message.trim()) return;
+
+          const isTransferChunk = message.startsWith('TRACK_TRANSFER_CHUNK|');
+
+          if (!isTransferChunk) {
+            setLastMessage(message);
+            addLog(`Node says: ${message}`);
+          }
+
+          if (message === 'PLAYLIST_RECEIVED') {
+            setPlaylistSyncedNodeCount(previous => previous + 1);
+            addLog('Node confirmed playlist sync');
+          }
+
+          if (message.startsWith('TRACK_RECEIVED|')) {
+            const trackId = message.split('|')[1];
+            addLog(`Node confirmed track received: ${trackId}`);
+          }
+
+          if (message.startsWith('PLAY_TRACK_SCHEDULED|')) {
+            const trackId = message.split('|')[1];
+            addLog(`Node scheduled track playback: ${trackId}`);
+          }
+        });
       });
 
       socket.on('close', () => {
@@ -442,11 +492,99 @@ export default function App() {
     }
 
     clientsRef.current.forEach(socket => {
-      socket.write(message);
+      writeSocket(socket, message);
     });
 
     addLog(`Sent ${message} to ${clientsRef.current.length} node(s)`);
     setStatus(`${message} sent`);
+  };
+
+  const playSelectedTrackOnAllSpeakers = () => {
+    const selected = getSelectedTrack();
+
+    if (!selected) {
+      Alert.alert('No track selected', 'Add and select a track first.');
+      return;
+    }
+
+    if (clientsRef.current.length === 0) {
+      addLog('No nodes connected');
+      setStatus('No nodes connected');
+      return;
+    }
+
+    const targetTimeMs = Date.now() + 3000;
+    const payload = {
+      id: selected.id,
+      name: selected.name,
+      targetTimeMs,
+    };
+
+    clientsRef.current.forEach(socket => {
+      writeSocket(socket, `PLAY_TRACK_AT|${JSON.stringify(payload)}`);
+    });
+
+    addLog(`Play on all speakers scheduled: ${selected.name}`);
+    setStatus(`Playing on all speakers in 3s`);
+  };
+
+  const transferSelectedTrackToNodes = async () => {
+    const selected = getSelectedTrack();
+
+    if (!selected) {
+      Alert.alert('No track selected', 'Add and select a track first.');
+      return;
+    }
+
+    if (clientsRef.current.length === 0) {
+      addLog('No nodes connected');
+      setStatus('No nodes connected');
+      return;
+    }
+
+    try {
+      setStatus('Reading selected track...');
+      addLog(`Reading track for transfer: ${selected.name}`);
+
+      const base64: string = await PartyAudio.readAudioUriAsBase64(selected.uri);
+      const chunkSize = 24000;
+      const chunks: string[] = [];
+
+      for (let i = 0; i < base64.length; i += chunkSize) {
+        chunks.push(base64.slice(i, i + chunkSize));
+      }
+
+      const startPayload = {
+        id: selected.id,
+        name: selected.name,
+        chunks: chunks.length,
+      };
+
+      clientsRef.current.forEach(socket => {
+        writeSocket(socket, `TRACK_TRANSFER_START|${JSON.stringify(startPayload)}`);
+      });
+
+      for (let i = 0; i < chunks.length; i++) {
+        clientsRef.current.forEach(socket => {
+          writeSocket(socket, `TRACK_TRANSFER_CHUNK|${selected.id}|${i}|${chunks[i]}`);
+        });
+
+        if (i % 10 === 0) {
+          setStatus(`Transferring ${selected.name}: ${i + 1}/${chunks.length}`);
+          await new Promise(resolve => setTimeout(resolve, 5));
+        }
+      }
+
+      clientsRef.current.forEach(socket => {
+        writeSocket(socket, `TRACK_TRANSFER_END|${selected.id}`);
+      });
+
+      setStatus('Track transfer sent');
+      addLog(`Track transfer sent: ${selected.name} (${chunks.length} chunks)`);
+    } catch (error) {
+      addLog(`Track transfer error: ${String(error)}`);
+      Alert.alert('Track transfer error', String(error));
+    }
   };
 
   const syncPlaylistToNodes = () => {
@@ -470,7 +608,7 @@ export default function App() {
     setLastPlaylistSyncTime(new Date().toLocaleTimeString());
 
     clientsRef.current.forEach(socket => {
-      socket.write(message);
+      writeSocket(socket, message);
     });
 
     addLog(`Sent playlist sync to ${clientsRef.current.length} node(s)`);
@@ -488,11 +626,31 @@ export default function App() {
     const message = `PLAY_CLIP_AT|${targetTimeMs}`;
 
     clientsRef.current.forEach(socket => {
-      socket.write(message);
+      writeSocket(socket, message);
     });
 
     addLog(`Scheduled clip for ${new Date(targetTimeMs).toLocaleTimeString()}`);
     setStatus('Scheduled clip sent');
+  };
+
+  const connectWithPartyCode = () => {
+    const cleanCode = partyCode.trim();
+
+    if (!cleanCode) {
+      Alert.alert('Missing party code', 'Enter the number shown on the host.');
+      return;
+    }
+
+    const numericCode = Number(cleanCode);
+
+    if (Number.isNaN(numericCode) || numericCode < 1 || numericCode > 254) {
+      Alert.alert('Invalid party code', 'Use a number from 1 to 254.');
+      return;
+    }
+
+    const ip = `${SUBNET_PREFIX}.${numericCode}`;
+    setHostIp(ip);
+    connectToHost(ip);
   };
 
   const connectToHost = (ipOverride?: string) => {
@@ -511,32 +669,35 @@ export default function App() {
       () => {
         setStatus('Node connected');
         addLog('Connected to host');
-        client.write('NODE_CONNECTED');
+        writeSocket(client, 'NODE_CONNECTED');
       },
     );
 
-    client.on('data', data => {
-      const message = data.toString();
-      setLastMessage(message);
-      addLog(`Host says: ${message}`);
+    const handleHostMessage = async (message: string) => {
+      const isTransferChunk = message.startsWith('TRACK_TRANSFER_CHUNK|');
+
+      if (!isTransferChunk) {
+        setLastMessage(message);
+        addLog(`Host says: ${message}`);
+      }
 
       if (message === 'PING') {
-        client.write('PONG');
+        writeSocket(client, 'PONG');
       }
 
       if (message === 'BEEP') {
         playLocalBeep();
-        client.write('BEEP_PLAYED');
+        writeSocket(client, 'BEEP_PLAYED');
       }
 
       if (message === 'TEST_TONE') {
         playLocalTestTone();
-        client.write('TEST_TONE_PLAYED');
+        writeSocket(client, 'TEST_TONE_PLAYED');
       }
 
       if (message === 'PLAY_CLIP') {
         playLocalPartyClip();
-        client.write('CLIP_PLAYED');
+        writeSocket(client, 'CLIP_PLAYED');
       }
 
       if (message.startsWith('PLAYLIST_SYNC|')) {
@@ -556,10 +717,69 @@ export default function App() {
           const selected = syncedTracks.find(track => track.id === payload.selectedTrackId);
           setCurrentTrackName(selected ? selected.name : 'None');
 
-          client.write('PLAYLIST_RECEIVED');
+          writeSocket(client, 'PLAYLIST_RECEIVED');
           addLog(`Synced playlist received: ${syncedTracks.length} track(s)`);
         } catch (error) {
           addLog(`Playlist sync parse error: ${String(error)}`);
+        }
+      }
+
+      if (message.startsWith('TRACK_TRANSFER_START|')) {
+        try {
+          const payload = JSON.parse(message.replace('TRACK_TRANSFER_START|', ''));
+          transferBuffersRef.current[payload.id] = {
+            name: payload.name,
+            chunks: new Array(payload.chunks).fill(''),
+          };
+          addLog(`Receiving track: ${payload.name} (${payload.chunks} chunks)`);
+        } catch (error) {
+          addLog(`Track start parse error: ${String(error)}`);
+        }
+      }
+
+      if (message.startsWith('TRACK_TRANSFER_CHUNK|')) {
+        const parts = message.split('|');
+        const trackId = parts[1];
+        const index = Number(parts[2]);
+        const chunk = parts.slice(3).join('|');
+
+        const buffer = transferBuffersRef.current[trackId];
+        if (buffer && !Number.isNaN(index)) {
+          buffer.chunks[index] = chunk;
+          if (index % 10 === 0) {
+            setStatus(`Receiving ${buffer.name}: ${index + 1}/${buffer.chunks.length}`);
+          }
+        }
+      }
+
+      if (message.startsWith('TRACK_TRANSFER_END|')) {
+        const trackId = message.split('|')[1];
+        const buffer = transferBuffersRef.current[trackId];
+
+        if (buffer) {
+          try {
+            const base64 = buffer.chunks.join('');
+            await PartyAudio.saveBase64Track(trackId, buffer.name, base64);
+            delete transferBuffersRef.current[trackId];
+
+            setStatus(`Track cached: ${buffer.name}`);
+            addLog(`Track cached: ${buffer.name}`);
+            writeSocket(client, `TRACK_RECEIVED|${trackId}`);
+          } catch (error) {
+            addLog(`Save transferred track error: ${String(error)}`);
+          }
+        }
+      }
+
+      if (message.startsWith('PLAY_TRACK_AT|')) {
+        try {
+          const payload = JSON.parse(message.replace('PLAY_TRACK_AT|', ''));
+
+          playCachedTrackAt(payload.id, payload.name, payload.targetTimeMs);
+          writeSocket(client, `PLAY_TRACK_SCHEDULED|${payload.id}`);
+          addLog(`Scheduled cached track from host: ${payload.name}`);
+        } catch (error) {
+          addLog(`PLAY_TRACK_AT parse error: ${String(error)}`);
         }
       }
 
@@ -569,9 +789,21 @@ export default function App() {
 
         if (!Number.isNaN(targetTimeMs)) {
           playPartyClipAt(targetTimeMs);
-          client.write('CLIP_SCHEDULED');
+          writeSocket(client, 'CLIP_SCHEDULED');
         }
       }
+    };
+
+    client.on('data', data => {
+      client._partyBuffer = `${client._partyBuffer || ''}${data.toString()}`;
+      const lines = client._partyBuffer.split('\n');
+      client._partyBuffer = lines.pop() || '';
+
+      lines.forEach((message: string) => {
+        if (message.trim()) {
+          handleHostMessage(message);
+        }
+      });
     });
 
     client.on('error', error => {
@@ -603,8 +835,69 @@ export default function App() {
       return;
     }
 
-    clientRef.current.write("I'M_ALIVE");
+    writeSocket(clientRef.current, "I'M_ALIVE");
     addLog("Sent I'M_ALIVE to host");
+  };
+
+  const playCachedTrackAt = (trackId: string, trackName: string, targetTimeMs: number) => {
+    const delay = Math.max(0, targetTimeMs - Date.now());
+
+    addLog(`Cached track scheduled in ${delay}ms: ${trackName}`);
+    setStatus(`Scheduled: ${trackName}`);
+
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+    }
+
+    const updateCountdown = () => {
+      const remainingMs = targetTimeMs - Date.now();
+
+      if (remainingMs <= 0) {
+        setCountdownText('Playing now');
+
+        if (countdownTimerRef.current) {
+          clearInterval(countdownTimerRef.current);
+          countdownTimerRef.current = null;
+        }
+
+        setTimeout(() => setCountdownText('Not scheduled'), 2000);
+        return;
+      }
+
+      setCountdownText(`Playing in ${Math.ceil(remainingMs / 1000)}s`);
+    };
+
+    updateCountdown();
+    countdownTimerRef.current = setInterval(updateCountdown, 200);
+
+    setTimeout(async () => {
+      try {
+        await PartyAudio.playCachedTrack(trackId, trackName);
+        addLog(`Playing scheduled cached track: ${trackName}`);
+        setStatus(`Playing: ${trackName}`);
+      } catch (error) {
+        addLog(`Scheduled cached track error: ${String(error)}`);
+        Alert.alert('Scheduled playback error', String(error));
+      }
+    }, delay);
+  };
+
+  const playCachedSelectedTrack = async () => {
+    const selected = getSelectedTrack();
+
+    if (!selected) {
+      Alert.alert('No cached track selected', 'Sync the playlist and select a track first.');
+      return;
+    }
+
+    try {
+      await PartyAudio.playCachedTrack(selected.id, selected.name);
+      addLog(`Playing cached track: ${selected.name}`);
+      setStatus(`Playing cached track: ${selected.name}`);
+    } catch (error) {
+      addLog(`Play cached track error: ${String(error)}`);
+      Alert.alert('Play cached track error', String(error));
+    }
   };
 
   const clearLog = () => setLog([]);
@@ -619,6 +912,12 @@ export default function App() {
   const renderStatusPanel = () => (
     <View style={styles.panel}>
       {renderPanelHeader('Party Status')}
+      <Text style={styles.label}>Party code</Text>
+      <Text style={styles.partyCode}>{partyCode || '...'}</Text>
+
+      <Text style={styles.label}>Host address</Text>
+      <Text style={styles.status}>{hostLocalIp}:5050</Text>
+
       <Text style={styles.label}>Status</Text>
       <Text style={styles.status}>{status}</Text>
 
@@ -688,6 +987,14 @@ export default function App() {
       {renderPanelHeader('Party Controls', 'These will become synced playlist controls')}
       <TouchableOpacity style={styles.button} onPress={syncPlaylistToNodes}>
         <Text style={styles.buttonText}>Sync Playlist to Nodes 📡</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.button} onPress={transferSelectedTrackToNodes}>
+        <Text style={styles.buttonText}>Transfer Selected Track 📦</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.button} onPress={playSelectedTrackOnAllSpeakers}>
+        <Text style={styles.buttonText}>Play On All Speakers ▶</Text>
       </TouchableOpacity>
 
       <Text style={styles.hint}>
@@ -834,6 +1141,22 @@ export default function App() {
           <Text style={styles.title}>🔊 Speaker Node</Text>
           <Text style={styles.text}>This phone connects to the host.</Text>
 
+          <Text style={styles.label}>Enter Party Code</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="e.g. 225"
+            placeholderTextColor="#6d8f7b"
+            value={partyCode}
+            onChangeText={setPartyCode}
+            autoCapitalize="none"
+            keyboardType="number-pad"
+          />
+
+          <Text style={styles.hint}>
+            Use the number shown on the host screen.
+          </Text>
+
+          <Text style={styles.label}>Manual Host IP</Text>
           <TextInput
             style={styles.input}
             placeholder="Host IP address"
@@ -861,22 +1184,43 @@ export default function App() {
             <Text style={styles.status}>{lastMessage}</Text>
           </View>
 
-          <TouchableOpacity style={styles.button} onPress={scanSubnetForHost}>
-            <Text style={styles.buttonText}>
-              {isScanning ? 'Scanning...' : 'Scan for Party Host'}
-            </Text>
+          <TouchableOpacity style={styles.button} onPress={connectWithPartyCode}>
+            <Text style={styles.buttonText}>Join With Party Code</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.button}
-            onPress={() =>
-              discoveredHost ? connectToHost(discoveredHost.ip) : connectToHost()
-            }>
-            <Text style={styles.buttonText}>Join Found Party</Text>
+            style={styles.secondaryButton}
+            onPress={() => setShowNodeDebugTools(previous => !previous)}>
+            <Text style={styles.secondaryButtonText}>
+              {showNodeDebugTools ? 'Hide Developer Tools ▲' : 'Developer Tools ▼'}
+            </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.button} onPress={sendAliveToHost}>
-            <Text style={styles.buttonText}>Send I'm Alive</Text>
+          {showNodeDebugTools ? (
+            <View style={styles.panel}>
+              {renderPanelHeader('Developer Tools')}
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() =>
+                  discoveredHost ? connectToHost(discoveredHost.ip) : connectToHost()
+                }>
+                <Text style={styles.secondaryButtonText}>Connect Using Manual IP</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.secondaryButton} onPress={scanSubnetForHost}>
+                <Text style={styles.secondaryButtonText}>
+                  {isScanning ? 'Scanning...' : 'Fallback Scan'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.button} onPress={sendAliveToHost}>
+                <Text style={styles.buttonText}>Send I'm Alive</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
+          <TouchableOpacity style={styles.button} onPress={playCachedSelectedTrack}>
+            <Text style={styles.buttonText}>Play Cached Track ▶</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.secondaryButton} onPress={disconnectFromHost}>
@@ -892,13 +1236,17 @@ export default function App() {
                 const selected = selectedTrackId === track.id;
 
                 return (
-                  <View
+                  <TouchableOpacity
                     key={track.id}
-                    style={selected ? styles.trackSelected : styles.trackRow}>
+                    style={selected ? styles.trackSelected : styles.trackRow}
+                    onPress={() => {
+                      setSelectedTrackId(track.id);
+                      setCurrentTrackName(track.name);
+                    }}>
                     <Text style={selected ? styles.trackTextSelected : styles.trackText}>
                       {index + 1}. {track.name}
                     </Text>
-                  </View>
+                  </TouchableOpacity>
                 );
               })
             )}
@@ -1103,6 +1451,12 @@ const styles = StyleSheet.create({
   status: {
     color: '#d7ffe9',
     fontSize: 15,
+  },
+  partyCode: {
+    color: '#ffffff',
+    fontSize: 36,
+    fontWeight: '900',
+    letterSpacing: 4,
   },
   countdown: {
     color: '#ffffff',
