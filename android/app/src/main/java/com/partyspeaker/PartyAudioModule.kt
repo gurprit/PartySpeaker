@@ -360,6 +360,62 @@ class PartyAudioModule(
         currentPlayer = null
     }
 
+
+    @ReactMethod
+    fun playCachedTrackFrom(trackId: String, fileName: String, positionMs: Double, promise: Promise) {
+        try {
+            stopCurrentPlayer()
+
+            val safeTrackId = trackId.replace(Regex("[^A-Za-z0-9_-]"), "_")
+            val safeFileName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            val tracksDir = File(reactContext.filesDir, "party_tracks")
+            val file = File(tracksDir, "${safeTrackId}_${safeFileName}")
+
+            if (!file.exists()) {
+                promise.reject("CACHED_TRACK_MISSING", "Cached track not found")
+                return
+            }
+
+            val player = MediaPlayer()
+            currentPlayer = player
+
+            player.setAudioStreamType(AudioManager.STREAM_MUSIC)
+            player.setDataSource(file.absolutePath)
+
+            player.setOnPreparedListener {
+                val seekToMs = positionMs.toInt().coerceAtLeast(0)
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    it.seekTo(seekToMs.toLong(), MediaPlayer.SEEK_CLOSEST)
+                } else {
+                    it.seekTo(seekToMs)
+                }
+
+                it.start()
+                promise.resolve(true)
+            }
+
+            player.setOnCompletionListener {
+                it.release()
+                if (currentPlayer === it) {
+                    currentPlayer = null
+                }
+            }
+
+            player.setOnErrorListener { mediaPlayer, _, _ ->
+                mediaPlayer.release()
+                if (currentPlayer === mediaPlayer) {
+                    currentPlayer = null
+                }
+                true
+            }
+
+            player.prepareAsync()
+        } catch (error: Exception) {
+            promise.reject("PLAY_CACHED_TRACK_FROM_ERROR", error)
+        }
+    }
+
     @ReactMethod
     fun playBeep(promise: Promise) {
         try {

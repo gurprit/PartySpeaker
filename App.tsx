@@ -32,8 +32,10 @@ const {PartyAudio} = NativeModules;
 
 const TCP_PORT = 5050;
 const UDP_PORT = 5051;
+const START_BUFFER_MS = 5000;
+const BLUETOOTH_LATENCY_COMPENSATION_MS = 0;
 const DISCOVERY_MESSAGE = 'PARTYSPEAKER_HOST';
-const SUBNET_PREFIX = '192.168.0';
+
 
 export default function App() {
   const [mode, setMode] = useState<Mode>('home');
@@ -50,6 +52,7 @@ export default function App() {
   const [showDebugTools, setShowDebugTools] = useState(false);
   const [showNodeDebugTools, setShowNodeDebugTools] = useState(false);
   const [hostLocalIp, setHostLocalIp] = useState('Unknown');
+  const [subnetPrefix, setSubnetPrefix] = useState('192.168.0');
   const [partyCode, setPartyCode] = useState('');
   const [playlistSyncedNodeCount, setPlaylistSyncedNodeCount] = useState(0);
   const [lastPlaylistSyncTime, setLastPlaylistSyncTime] = useState('Never');
@@ -57,6 +60,13 @@ export default function App() {
   const [playlist, setPlaylist] = useState<Track[]>([]);
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
   const [currentTrackName, setCurrentTrackName] = useState('None');
+  const [transferProgressText, setTransferProgressText] = useState('No transfer yet');
+  const [transferProgress, setTransferProgress] = useState(0);
+  const [trackTransferStatus, setTrackTransferStatus] = useState<Record<string, number>>({});
+  const [hostClockOffsetMs, setHostClockOffsetMs] = useState(0);
+  const [playbackPositionText, setPlaybackPositionText] = useState('0:00');
+  const [nowPlayingText, setNowPlayingText] = useState('Nothing playing');
+  const [nodePlaybackDelayMs, setNodePlaybackDelayMs] = useState(0);
 
   const serverRef = useRef<any>(null);
   const clientsRef = useRef<any[]>([]);
@@ -64,7 +74,12 @@ export default function App() {
   const udpHostRef = useRef<any>(null);
   const broadcastTimerRef = useRef<any>(null);
   const countdownTimerRef = useRef<any>(null);
+  const playbackUiTimerRef = useRef<any>(null);
+  const nowPlayingBroadcastTimerRef = useRef<any>(null);
+  const nowPlayingRef = useRef<{trackId: string; trackName: string; startedAtHostMs: number} | null>(null);
+  const currentlyPlayingTrackRef = useRef<string | null>(null);
   const transferBuffersRef = useRef<Record<string, {name: string; chunks: string[]}>>({});
+  const cachedTracksRef = useRef<Record<string, string[]>>({});
 
   useEffect(() => {
     refreshHostAddress();
@@ -100,8 +115,21 @@ export default function App() {
       setHostLocalIp(ip || 'Unknown');
 
       if (ip && typeof ip === 'string' && ip.includes('.')) {
-        const lastPart = ip.split('.').pop() || '';
-        setPartyCode(lastPart);
+        const parts = ip.split('.');
+
+        if (parts.length === 4) {
+          const detectedPrefix = `${parts[0]}.${parts[1]}.${parts[2]}`;
+
+          // Android emulator usually reports 10.0.2.x, but the real host phone
+          // is on the physical LAN. Keep our known working LAN prefix for emulator testing.
+          if (detectedPrefix === '10.0.2') {
+            setSubnetPrefix('192.168.0');
+          } else {
+            setSubnetPrefix(detectedPrefix);
+          }
+
+          setPartyCode(parts[3]);
+        }
       }
 
       return ip;
@@ -111,8 +139,90 @@ export default function App() {
     }
   };
 
+  const formatMs = (ms: number) => {
+    const safeMs = Math.max(0, ms);
+    const totalSeconds = Math.floor(safeMs / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+  };
+
+  const getNodeHostNowMs = () => Date.now() + hostClockOffsetMs;
+
+  const getPlaybackDelayCompensationMs = () => {
+    return nodePlaybackDelayMs;
+  };
+
+  const startPlaybackUiClock = (trackName: string, startedAtHostMs: number) => {
+    if (playbackUiTimerRef.current) {
+      clearInterval(playbackUiTimerRef.current);
+    }
+
+    setNowPlayingText(trackName);
+
+    playbackUiTimerRef.current = setInterval(() => {
+      const hostNow = mode === 'host' ? Date.now() : getNodeHostNowMs();
+      const positionMs = hostNow - startedAtHostMs;
+      setPlaybackPositionText(formatMs(positionMs));
+    }, 500);
+  };
+
+  const stopPlaybackUiClock = () => {
+    if (playbackUiTimerRef.current) {
+      clearInterval(playbackUiTimerRef.current);
+      playbackUiTimerRef.current = null;
+    }
+
+    currentlyPlayingTrackRef.current = null;
+    setPlaybackPositionText('0:00');
+    setNowPlayingText('Nothing playing');
+  };
+
+  const sendTimeSyncToNode = (socket: any) => {
+    writeSocket(socket, `SYNC_TIME|${Date.now()}`);
+  };
+
+  const broadcastNowPlaying = () => {
+    if (!nowPlayingRef.current || clientsRef.current.length === 0) {
+      return;
+    }
+
+    const payload = {
+      ...nowPlayingRef.current,
+      hostNowMs: Date.now(),
+    };
+
+    clientsRef.current.forEach(socket => {
+      writeSocket(socket, `NOW_PLAYING|${JSON.stringify(payload)}`);
+    });
+  };
+
   const getSelectedTrack = () => {
     return playlist.find(track => track.id === selectedTrackId) || null;
+  };
+
+  const setTrackProgress = (trackId: string, percent: number) => {
+    setTrackTransferStatus(previous => ({
+      ...previous,
+      [trackId]: Math.max(0, Math.min(100, percent)),
+    }));
+  };
+
+  const autoSyncAndTransfer = (track?: Track, playlistSnapshot?: Track[], selectedIdSnapshot?: string | null) => {
+    setTimeout(() => {
+      if (playlistSnapshot) {
+        syncPlaylistSnapshotToNodes(
+          playlistSnapshot,
+          selectedIdSnapshot === undefined ? selectedTrackId : selectedIdSnapshot,
+        );
+      } else {
+        syncPlaylistToNodes();
+      }
+
+      if (track) {
+        transferSelectedTrackToNodes(track);
+      }
+    }, 100);
   };
 
   const addTrack = async () => {
@@ -125,10 +235,14 @@ export default function App() {
         uri: result.uri,
       };
 
-      setPlaylist(previous => [...previous, track]);
+      const nextPlaylist = [...playlist, track];
+
+      setPlaylist(nextPlaylist);
       setSelectedTrackId(track.id);
       setCurrentTrackName(track.name);
+      setTrackProgress(track.id, 0);
       addLog(`Added track: ${track.name}`);
+      autoSyncAndTransfer(track, nextPlaylist, track.id);
     } catch (error) {
       addLog(`Add track cancelled/error: ${String(error)}`);
     }
@@ -154,6 +268,14 @@ export default function App() {
     }
 
     addLog(`Removed track: ${selected.name}`);
+    setTrackTransferStatus(previous => {
+      const updated = {...previous};
+      delete updated[selected.id];
+      return updated;
+    });
+    setTimeout(() => {
+      syncPlaylistSnapshotToNodes(nextPlaylist, nextPlaylist[0]?.id || null);
+    }, 100);
   };
 
   const playSelectedTrackLocal = async () => {
@@ -237,7 +359,8 @@ export default function App() {
   };
 
   const playPartyClipAt = (targetTimeMs: number) => {
-    const delay = Math.max(0, targetTimeMs - Date.now());
+    const nodeHostNow = getNodeHostNowMs();
+    const delay = Math.max(0, targetTimeMs - nodeHostNow + getPlaybackDelayCompensationMs());
     addLog(`Clip scheduled in ${delay}ms`);
 
     if (countdownTimerRef.current) {
@@ -285,6 +408,12 @@ export default function App() {
       addLog('Node connected');
 
       writeSocket(socket, 'WELCOME_FROM_HOST');
+      sendTimeSyncToNode(socket);
+
+      setTimeout(() => {
+        syncPlaylistSnapshotToNodes(playlist, selectedTrackId);
+        broadcastNowPlaying();
+      }, 300);
 
       socket.on('data', data => {
         socket._partyBuffer = `${socket._partyBuffer || ''}${data.toString()}`;
@@ -307,8 +436,21 @@ export default function App() {
           }
 
           if (message.startsWith('TRACK_RECEIVED|')) {
-            const trackId = message.split('|')[1];
-            addLog(`Node confirmed track received: ${trackId}`);
+            const parts = message.split('|');
+            const trackId = parts[1];
+            const trackName = parts[2] || '';
+
+            const key = socket.remoteAddress || 'unknown';
+
+            if (!cachedTracksRef.current[key]) {
+              cachedTracksRef.current[key] = [];
+            }
+
+            if (!cachedTracksRef.current[key].includes(trackId)) {
+              cachedTracksRef.current[key].push(trackId);
+            }
+
+            addLog(`Node cached track: ${trackName}`);
           }
 
           if (message.startsWith('PLAY_TRACK_SCHEDULED|')) {
@@ -480,6 +622,14 @@ export default function App() {
       serverRef.current = null;
     }
 
+    if (nowPlayingBroadcastTimerRef.current) {
+      clearInterval(nowPlayingBroadcastTimerRef.current);
+      nowPlayingBroadcastTimerRef.current = null;
+    }
+
+    nowPlayingRef.current = null;
+    stopPlaybackUiClock();
+
     setStatus('Host server stopped');
     addLog('Host server stopped');
   };
@@ -499,37 +649,72 @@ export default function App() {
     setStatus(`${message} sent`);
   };
 
-  const playSelectedTrackOnAllSpeakers = () => {
-    const selected = getSelectedTrack();
+  const pauseAllSpeakers = () => {
+    sendMessageToNodes('PAUSE_TRACK');
+    stopSelectedTrackLocal();
+    nowPlayingRef.current = null;
+    stopPlaybackUiClock();
 
-    if (!selected) {
-      Alert.alert('No track selected', 'Add and select a track first.');
-      return;
+    if (nowPlayingBroadcastTimerRef.current) {
+      clearInterval(nowPlayingBroadcastTimerRef.current);
+      nowPlayingBroadcastTimerRef.current = null;
     }
 
-    if (clientsRef.current.length === 0) {
-      addLog('No nodes connected');
-      setStatus('No nodes connected');
-      return;
-    }
-
-    const targetTimeMs = Date.now() + 3000;
-    const payload = {
-      id: selected.id,
-      name: selected.name,
-      targetTimeMs,
-    };
-
-    clientsRef.current.forEach(socket => {
-      writeSocket(socket, `PLAY_TRACK_AT|${JSON.stringify(payload)}`);
-    });
-
-    addLog(`Play on all speakers scheduled: ${selected.name}`);
-    setStatus(`Playing on all speakers in 3s`);
+    setStatus('Pause sent to all speakers');
   };
 
-  const transferSelectedTrackToNodes = async () => {
-    const selected = getSelectedTrack();
+  const selectTrackByOffset = (offset: number) => {
+    if (playlist.length === 0) {
+      return;
+    }
+
+    const currentIndex = playlist.findIndex(track => track.id === selectedTrackId);
+    const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+    const nextIndex = (safeIndex + offset + playlist.length) % playlist.length;
+    const nextTrack = playlist[nextIndex];
+
+    setSelectedTrackId(nextTrack.id);
+    setCurrentTrackName(nextTrack.name);
+    addLog(`Selected track: ${nextTrack.name}`);
+    autoSyncAndTransfer(nextTrack, playlist, nextTrack.id);
+
+    setTimeout(() => {
+      playSelectedTrackOnAllSpeakers(nextTrack);
+    }, 1000);
+  };
+
+  const isTrackCachedOnAllNodes = (trackId: string) => {
+    if (clientsRef.current.length === 0) {
+      return false;
+    }
+
+    return clientsRef.current.every(socket => {
+      const key = socket.remoteAddress || 'unknown';
+      return cachedTracksRef.current[key]?.includes(trackId);
+    });
+  };
+
+  const waitForTrackCachedOnAllNodes = async (track: Track, timeoutMs = 45000) => {
+    const startedAt = Date.now();
+
+    while (!isTrackCachedOnAllNodes(track.id)) {
+      if (Date.now() - startedAt > timeoutMs) {
+        throw new Error(`Timed out waiting for nodes to cache ${track.name}`);
+      }
+
+      setStatus(`Waiting for nodes to cache: ${track.name}`);
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  };
+
+  const playSelectedTrackOnAllSpeakers = async (trackOverride?: Track) => {
+    const looksLikeTrack =
+      trackOverride &&
+      typeof trackOverride === 'object' &&
+      typeof (trackOverride as any).id === 'string' &&
+      typeof (trackOverride as any).name === 'string';
+
+    const selected = looksLikeTrack ? trackOverride : getSelectedTrack();
 
     if (!selected) {
       Alert.alert('No track selected', 'Add and select a track first.');
@@ -543,6 +728,80 @@ export default function App() {
     }
 
     try {
+      if (!isTrackCachedOnAllNodes(selected.id)) {
+        addLog(`Selected track not cached everywhere. Transferring first: ${selected.name}`);
+        await transferSelectedTrackToNodes(selected);
+        await waitForTrackCachedOnAllNodes(selected);
+      }
+    } catch (error) {
+      addLog(`Cannot play yet: ${String(error)}`);
+      Alert.alert('Track not ready', String(error));
+      return;
+    }
+
+    const targetTimeMs = Date.now() + START_BUFFER_MS;
+    const payload = {
+      id: selected.id,
+      name: selected.name,
+      targetTimeMs,
+      hostNowMs: Date.now(),
+    };
+
+    nowPlayingRef.current = {
+      trackId: selected.id,
+      trackName: selected.name,
+      startedAtHostMs: targetTimeMs,
+    };
+
+    clientsRef.current.forEach(socket => {
+      sendTimeSyncToNode(socket);
+      writeSocket(socket, `PLAY_TRACK_AT|${JSON.stringify(payload)}`);
+    });
+
+    if (nowPlayingBroadcastTimerRef.current) {
+      clearInterval(nowPlayingBroadcastTimerRef.current);
+    }
+
+    nowPlayingBroadcastTimerRef.current = setInterval(broadcastNowPlaying, 3000);
+
+    startPlaybackUiClock(selected.name, targetTimeMs);
+    addLog(`Play on all speakers scheduled: ${selected.name}`);
+    setStatus(`Playing on all speakers in ${Math.round(START_BUFFER_MS / 1000)}s`);
+  };
+
+  const transferSelectedTrackToNodes = async (trackOverride?: Track) => {
+    const selected = trackOverride || getSelectedTrack();
+
+    if (!selected) {
+      Alert.alert('No track selected', 'Add and select a track first.');
+      return;
+    }
+
+    if (clientsRef.current.length === 0) {
+      addLog('No nodes connected');
+      setStatus('No nodes connected');
+      return;
+    }
+
+    try {
+
+      const allNodesHaveTrack = clientsRef.current.every(socket => {
+        const key = socket.remoteAddress || 'unknown';
+        return cachedTracksRef.current[key]?.includes(selected.id);
+      });
+
+      if (clientsRef.current.length > 0 && allNodesHaveTrack) {
+        addLog(`Skipping transfer. All nodes already cached ${selected.name}`);
+        setStatus(`Already cached on all nodes`);
+        setTransferProgressText(`Cached: ${selected.name}`);
+        setTransferProgress(100);
+        setTrackProgress(selected.id, 100);
+        return;
+      }
+
+      setTransferProgress(0);
+      setTrackProgress(selected.id, 0);
+      setTransferProgressText(`Preparing: ${selected.name}`);
       setStatus('Reading selected track...');
       addLog(`Reading track for transfer: ${selected.name}`);
 
@@ -570,6 +829,10 @@ export default function App() {
         });
 
         if (i % 10 === 0) {
+          const percent = Math.round(((i + 1) / chunks.length) * 100);
+          setTransferProgress(percent);
+          setTrackProgress(selected.id, percent);
+          setTransferProgressText(`Transferring ${selected.name}: ${percent}%`);
           setStatus(`Transferring ${selected.name}: ${i + 1}/${chunks.length}`);
           await new Promise(resolve => setTimeout(resolve, 5));
         }
@@ -579,12 +842,43 @@ export default function App() {
         writeSocket(socket, `TRACK_TRANSFER_END|${selected.id}`);
       });
 
+      setTransferProgress(100);
+      setTrackProgress(selected.id, 100);
+      setTransferProgressText(`Transferred: ${selected.name}`);
       setStatus('Track transfer sent');
       addLog(`Track transfer sent: ${selected.name} (${chunks.length} chunks)`);
     } catch (error) {
       addLog(`Track transfer error: ${String(error)}`);
       Alert.alert('Track transfer error', String(error));
     }
+  };
+
+  const syncPlaylistSnapshotToNodes = (tracksSnapshot: Track[], selectedIdSnapshot: string | null) => {
+    if (clientsRef.current.length === 0) {
+      addLog('No nodes connected');
+      setStatus('No nodes connected');
+      return;
+    }
+
+    const payload = {
+      tracks: tracksSnapshot.map(track => ({
+        id: track.id,
+        name: track.name,
+      })),
+      selectedTrackId: selectedIdSnapshot,
+    };
+
+    const message = `PLAYLIST_SYNC|${JSON.stringify(payload)}`;
+
+    setPlaylistSyncedNodeCount(0);
+    setLastPlaylistSyncTime(new Date().toLocaleTimeString());
+
+    clientsRef.current.forEach(socket => {
+      writeSocket(socket, message);
+    });
+
+    addLog(`Auto-synced playlist to ${clientsRef.current.length} node(s)`);
+    setStatus('Playlist synced');
   };
 
   const syncPlaylistToNodes = () => {
@@ -641,14 +935,20 @@ export default function App() {
       return;
     }
 
-    const numericCode = Number(cleanCode);
-
-    if (Number.isNaN(numericCode) || numericCode < 1 || numericCode > 254) {
-      Alert.alert('Invalid party code', 'Use a number from 1 to 254.');
+    if (cleanCode.includes('.')) {
+      setHostIp(cleanCode);
+      connectToHost(cleanCode);
       return;
     }
 
-    const ip = `${SUBNET_PREFIX}.${numericCode}`;
+    const numericCode = Number(cleanCode);
+
+    if (Number.isNaN(numericCode) || numericCode < 1 || numericCode > 254) {
+      Alert.alert('Invalid party code', 'Use a number from 1 to 254, or enter the full host IP.');
+      return;
+    }
+
+    const ip = `${subnetPrefix}.${numericCode}`;
     setHostIp(ip);
     connectToHost(ip);
   };
@@ -681,6 +981,47 @@ export default function App() {
         addLog(`Host says: ${message}`);
       }
 
+      if (message.startsWith('SYNC_TIME|')) {
+        const hostNow = Number(message.split('|')[1]);
+        if (!Number.isNaN(hostNow)) {
+          const offset = hostNow - Date.now();
+          setHostClockOffsetMs(offset);
+          addLog(`Clock sync offset: ${offset}ms`);
+        }
+      }
+
+      if (message.startsWith('NOW_PLAYING|')) {
+        try {
+          const payload = JSON.parse(message.replace('NOW_PLAYING|', ''));
+
+          if (payload.trackId && payload.trackName && payload.startedAtHostMs) {
+            nowPlayingRef.current = {
+              trackId: payload.trackId,
+              trackName: payload.trackName,
+              startedAtHostMs: payload.startedAtHostMs,
+            };
+
+            startPlaybackUiClock(payload.trackName, payload.startedAtHostMs);
+
+            const alreadyPlayingThisTrack =
+              currentlyPlayingTrackRef.current === payload.trackId;
+
+            if (!alreadyPlayingThisTrack) {
+              const hostNow = getNodeHostNowMs();
+              const positionMs = hostNow - payload.startedAtHostMs;
+
+              if (positionMs > 750) {
+                await playCachedTrackFromPosition(payload.trackId, payload.trackName, positionMs);
+              }
+            }
+
+            setStatus(`Now playing: ${payload.trackName}`);
+          }
+        } catch (error) {
+          addLog(`NOW_PLAYING parse error: ${String(error)}`);
+        }
+      }
+
       if (message === 'PING') {
         writeSocket(client, 'PONG');
       }
@@ -693,6 +1034,19 @@ export default function App() {
       if (message === 'TEST_TONE') {
         playLocalTestTone();
         writeSocket(client, 'TEST_TONE_PLAYED');
+      }
+
+      if (message === 'PAUSE_TRACK') {
+        try {
+          await PartyAudio.stopAudioUri();
+        } catch (error) {
+          addLog(`Pause error: ${String(error)}`);
+        }
+
+        nowPlayingRef.current = null;
+        stopPlaybackUiClock();
+        setStatus('Paused');
+        writeSocket(client, 'TRACK_PAUSED');
       }
 
       if (message === 'PLAY_CLIP') {
@@ -731,6 +1085,7 @@ export default function App() {
             name: payload.name,
             chunks: new Array(payload.chunks).fill(''),
           };
+          setTrackProgress(payload.id, 0);
           addLog(`Receiving track: ${payload.name} (${payload.chunks} chunks)`);
         } catch (error) {
           addLog(`Track start parse error: ${String(error)}`);
@@ -747,7 +1102,9 @@ export default function App() {
         if (buffer && !Number.isNaN(index)) {
           buffer.chunks[index] = chunk;
           if (index % 10 === 0) {
-            setStatus(`Receiving ${buffer.name}: ${index + 1}/${buffer.chunks.length}`);
+            const percent = Math.round(((index + 1) / buffer.chunks.length) * 100);
+            setTrackProgress(trackId, percent);
+            setStatus(`Receiving ${buffer.name}: ${percent}%`);
           }
         }
       }
@@ -763,8 +1120,9 @@ export default function App() {
             delete transferBuffersRef.current[trackId];
 
             setStatus(`Track cached: ${buffer.name}`);
+            setTrackProgress(trackId, 100);
             addLog(`Track cached: ${buffer.name}`);
-            writeSocket(client, `TRACK_RECEIVED|${trackId}`);
+            writeSocket(client, `TRACK_RECEIVED|${trackId}|${buffer.name}`);
           } catch (error) {
             addLog(`Save transferred track error: ${String(error)}`);
           }
@@ -775,8 +1133,32 @@ export default function App() {
         try {
           const payload = JSON.parse(message.replace('PLAY_TRACK_AT|', ''));
 
-          playCachedTrackAt(payload.id, payload.name, payload.targetTimeMs);
-          writeSocket(client, `PLAY_TRACK_SCHEDULED|${payload.id}`);
+          if (!payload.id || !payload.name || !payload.targetTimeMs) {
+            addLog('Ignored broken PLAY_TRACK_AT message');
+            return;
+          }
+
+          currentlyPlayingTrackRef.current = null;
+
+          nowPlayingRef.current = {
+            trackId: payload.id,
+            trackName: payload.name,
+            startedAtHostMs: payload.targetTimeMs,
+          };
+
+          startPlaybackUiClock(payload.name, payload.targetTimeMs);
+
+          const hostNow = getNodeHostNowMs();
+          const positionMs = hostNow - payload.targetTimeMs;
+
+          if (positionMs > 750) {
+            await playCachedTrackFromPosition(payload.id, payload.name, positionMs);
+            writeSocket(client, `PLAY_TRACK_CATCHUP|${payload.id}|${Math.round(positionMs)}`);
+          } else {
+            playCachedTrackAt(payload.id, payload.name, payload.targetTimeMs);
+            writeSocket(client, `PLAY_TRACK_SCHEDULED|${payload.id}`);
+          }
+
           addLog(`Scheduled cached track from host: ${payload.name}`);
         } catch (error) {
           addLog(`PLAY_TRACK_AT parse error: ${String(error)}`);
@@ -839,8 +1221,23 @@ export default function App() {
     addLog("Sent I'M_ALIVE to host");
   };
 
+  const playCachedTrackFromPosition = async (trackId: string, trackName: string, positionMs: number) => {
+    try {
+      const safePosition = Math.max(0, positionMs + getPlaybackDelayCompensationMs());
+      await PartyAudio.playCachedTrackFrom(trackId, trackName, safePosition);
+      currentlyPlayingTrackRef.current = trackId;
+      addLog(`Catch-up playing ${trackName} from ${formatMs(safePosition)}`);
+      setStatus(`Playing: ${trackName}`);
+      setNowPlayingText(trackName);
+    } catch (error) {
+      addLog(`Catch-up playback error: ${String(error)}`);
+      Alert.alert('Catch-up playback error', String(error));
+    }
+  };
+
   const playCachedTrackAt = (trackId: string, trackName: string, targetTimeMs: number) => {
-    const delay = Math.max(0, targetTimeMs - Date.now());
+    const nodeHostNow = getNodeHostNowMs();
+    const delay = Math.max(0, targetTimeMs - nodeHostNow + getPlaybackDelayCompensationMs());
 
     addLog(`Cached track scheduled in ${delay}ms: ${trackName}`);
     setStatus(`Scheduled: ${trackName}`);
@@ -873,6 +1270,7 @@ export default function App() {
     setTimeout(async () => {
       try {
         await PartyAudio.playCachedTrack(trackId, trackName);
+        currentlyPlayingTrackRef.current = trackId;
         addLog(`Playing scheduled cached track: ${trackName}`);
         setStatus(`Playing: ${trackName}`);
       } catch (error) {
@@ -900,6 +1298,19 @@ export default function App() {
     }
   };
 
+  const adjustNodeDelay = (amount: number) => {
+    setNodePlaybackDelayMs(previous => {
+      const next = Math.max(-1000, Math.min(1000, previous + amount));
+      addLog(`Node delay set to ${next}ms`);
+      return next;
+    });
+  };
+
+  const resetNodeDelay = () => {
+    setNodePlaybackDelayMs(0);
+    addLog('Node delay reset to 0ms');
+  };
+
   const clearLog = () => setLog([]);
 
   const renderPanelHeader = (title: string, subtitle?: string) => (
@@ -911,46 +1322,29 @@ export default function App() {
 
   const renderStatusPanel = () => (
     <View style={styles.panel}>
-      {renderPanelHeader('Party Status')}
-      <Text style={styles.label}>Party code</Text>
+      {renderPanelHeader('Party Code')}
       <Text style={styles.partyCode}>{partyCode || '...'}</Text>
-
-      <Text style={styles.label}>Host address</Text>
       <Text style={styles.status}>{hostLocalIp}:5050</Text>
-
-      <Text style={styles.label}>Status</Text>
-      <Text style={styles.status}>{status}</Text>
-
-      <Text style={styles.label}>Connected nodes</Text>
-      <Text style={styles.status}>{nodeCount}</Text>
-
-      <Text style={styles.label}>Last message</Text>
-      <Text style={styles.status}>{lastMessage}</Text>
+      <Text style={styles.status}>Status: {status}</Text>
+      <Text style={styles.status}>Nodes: {nodeCount}</Text>
     </View>
   );
 
   const renderPlaylistPanel = () => (
     <View style={styles.panel}>
-      {renderPanelHeader('Host Playlist', 'Add tracks and control playback from here')}
-      <Text style={styles.status}>Current: {currentTrackName}</Text>
-      <Text style={styles.status}>
-        Playlist sync: {playlistSyncedNodeCount}/{nodeCount} node(s)
-      </Text>
-      <Text style={styles.status}>Last sync: {lastPlaylistSyncTime}</Text>
+      {renderPanelHeader('Playlist')}
+      <Text style={styles.status}>Selected: {currentTrackName}</Text>
+      <Text style={styles.status}>Playback: {nowPlayingText}</Text>
+      <Text style={styles.status}>Position: {playbackPositionText}</Text>
+      <Text style={styles.status}>{transferProgressText}</Text>
+
+      <View style={styles.meterOuter}>
+        <View style={[styles.meterInner, {width: `${transferProgress}%`}]} />
+      </View>
 
       <TouchableOpacity style={styles.button} onPress={addTrack}>
         <Text style={styles.buttonText}>Add Track ＋</Text>
       </TouchableOpacity>
-
-      <View style={styles.row}>
-        <TouchableOpacity style={styles.halfButton} onPress={playSelectedTrackLocal}>
-          <Text style={styles.buttonText}>Play ▶</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.halfSecondaryButton} onPress={stopSelectedTrackLocal}>
-          <Text style={styles.secondaryButtonText}>Stop</Text>
-        </TouchableOpacity>
-      </View>
 
       <TouchableOpacity style={styles.secondaryButton} onPress={removeSelectedTrack}>
         <Text style={styles.secondaryButtonText}>Remove Selected Track</Text>
@@ -970,10 +1364,25 @@ export default function App() {
                 onPress={() => {
                   setSelectedTrackId(track.id);
                   setCurrentTrackName(track.name);
+                  addLog(`Selected track: ${track.name}`);
+                  autoSyncAndTransfer(track, playlist, track.id);
                 }}>
                 <Text style={selected ? styles.trackTextSelected : styles.trackText}>
                   {index + 1}. {track.name}
                 </Text>
+                <Text style={selected ? styles.trackMetaSelected : styles.trackMeta}>
+                  {trackTransferStatus[track.id] === 100
+                    ? 'Cached on nodes'
+                    : `Loading ${trackTransferStatus[track.id] || 0}%`}
+                </Text>
+                <View style={selected ? styles.trackMeterOuterSelected : styles.trackMeterOuter}>
+                  <View
+                    style={[
+                      styles.trackMeterInner,
+                      {width: `${trackTransferStatus[track.id] || 0}%`},
+                    ]}
+                  />
+                </View>
               </TouchableOpacity>
             );
           })
@@ -984,29 +1393,24 @@ export default function App() {
 
   const renderPartyControls = () => (
     <View style={styles.panel}>
-      {renderPanelHeader('Party Controls', 'These will become synced playlist controls')}
-      <TouchableOpacity style={styles.button} onPress={syncPlaylistToNodes}>
-        <Text style={styles.buttonText}>Sync Playlist to Nodes 📡</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity style={styles.button} onPress={transferSelectedTrackToNodes}>
-        <Text style={styles.buttonText}>Transfer Selected Track 📦</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity style={styles.button} onPress={playSelectedTrackOnAllSpeakers}>
+      {renderPanelHeader('Speaker Controls')}
+      <TouchableOpacity style={styles.button} onPress={() => playSelectedTrackOnAllSpeakers()}>
         <Text style={styles.buttonText}>Play On All Speakers ▶</Text>
       </TouchableOpacity>
 
-      <Text style={styles.hint}>
-        Confirmed by {playlistSyncedNodeCount}/{nodeCount} connected node(s).
-      </Text>
-
-      <TouchableOpacity style={styles.button} onPress={sendScheduledClipToNodes}>
-        <Text style={styles.buttonText}>Countdown Sync Test ⏱️</Text>
+      <TouchableOpacity style={styles.secondaryButton} onPress={pauseAllSpeakers}>
+        <Text style={styles.secondaryButtonText}>Pause On All Speakers ⏸</Text>
       </TouchableOpacity>
-      <Text style={styles.hint}>
-        Next step: this button will schedule the selected playlist track on every node.
-      </Text>
+
+      <View style={styles.row}>
+        <TouchableOpacity style={styles.halfSecondaryButton} onPress={() => selectTrackByOffset(-1)}>
+          <Text style={styles.secondaryButtonText}>Previous</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.halfSecondaryButton} onPress={() => selectTrackByOffset(1)}>
+          <Text style={styles.secondaryButtonText}>Next</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 
@@ -1068,6 +1472,14 @@ export default function App() {
 
       {showDebugTools ? (
         <>
+          <TouchableOpacity style={styles.button} onPress={syncPlaylistToNodes}>
+            <Text style={styles.buttonText}>Manual Sync Playlist 📡</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.button} onPress={() => transferSelectedTrackToNodes()}>
+            <Text style={styles.buttonText}>Manual Transfer Selected 📦</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.button} onPress={() => sendMessageToNodes('PING')}>
             <Text style={styles.buttonText}>Send PING</Text>
           </TouchableOpacity>
@@ -1109,7 +1521,7 @@ export default function App() {
       <SafeAreaView style={styles.screen}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <Text style={styles.title}>🎛️ Party Host</Text>
-          <Text style={styles.text}>Playlist control centre.</Text>
+          <Text style={styles.text}>Control the playlist and speakers.</Text>
 
           {renderStatusPanel()}
 
@@ -1156,79 +1568,46 @@ export default function App() {
             Use the number shown on the host screen.
           </Text>
 
-          <Text style={styles.label}>Manual Host IP</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Host IP address"
-            placeholderTextColor="#6d8f7b"
-            value={hostIp}
-            onChangeText={setHostIp}
-            autoCapitalize="none"
-            keyboardType="numbers-and-punctuation"
-          />
-
-          <View style={styles.panel}>
-            {renderPanelHeader('Node Status')}
-            <Text style={styles.label}>Status</Text>
-            <Text style={styles.status}>{status}</Text>
-
-            <Text style={styles.label}>Discovered host</Text>
-            <Text style={styles.status}>
-              {discoveredHost ? `${discoveredHost.ip}:${discoveredHost.port}` : 'None yet'}
-            </Text>
-
-            <Text style={styles.label}>Countdown Sync Test</Text>
-            <Text style={styles.countdown}>{countdownText}</Text>
-
-            <Text style={styles.label}>Last message</Text>
-            <Text style={styles.status}>{lastMessage}</Text>
-          </View>
-
           <TouchableOpacity style={styles.button} onPress={connectWithPartyCode}>
             <Text style={styles.buttonText}>Join With Party Code</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.secondaryButton}
-            onPress={() => setShowNodeDebugTools(previous => !previous)}>
-            <Text style={styles.secondaryButtonText}>
-              {showNodeDebugTools ? 'Hide Developer Tools ▲' : 'Developer Tools ▼'}
+          <View style={styles.panel}>
+            {renderPanelHeader('Node Delay Calibration', 'Use this to line up speakers by ear')}
+            <Text style={styles.status}>
+              Delay: {nodePlaybackDelayMs}ms
             </Text>
-          </TouchableOpacity>
+            <Text style={styles.hint}>
+              Negative plays earlier. Positive plays later.
+            </Text>
 
-          {showNodeDebugTools ? (
-            <View style={styles.panel}>
-              {renderPanelHeader('Developer Tools')}
-              <TouchableOpacity
-                style={styles.secondaryButton}
-                onPress={() =>
-                  discoveredHost ? connectToHost(discoveredHost.ip) : connectToHost()
-                }>
-                <Text style={styles.secondaryButtonText}>Connect Using Manual IP</Text>
+            <View style={styles.row}>
+              <TouchableOpacity style={styles.halfSecondaryButton} onPress={() => adjustNodeDelay(-100)}>
+                <Text style={styles.secondaryButtonText}>-100ms</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.secondaryButton} onPress={scanSubnetForHost}>
-                <Text style={styles.secondaryButtonText}>
-                  {isScanning ? 'Scanning...' : 'Fallback Scan'}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.button} onPress={sendAliveToHost}>
-                <Text style={styles.buttonText}>Send I'm Alive</Text>
+              <TouchableOpacity style={styles.halfSecondaryButton} onPress={() => adjustNodeDelay(100)}>
+                <Text style={styles.secondaryButtonText}>+100ms</Text>
               </TouchableOpacity>
             </View>
-          ) : null}
 
-          <TouchableOpacity style={styles.button} onPress={playCachedSelectedTrack}>
-            <Text style={styles.buttonText}>Play Cached Track ▶</Text>
-          </TouchableOpacity>
+            <View style={styles.row}>
+              <TouchableOpacity style={styles.halfSecondaryButton} onPress={() => adjustNodeDelay(-25)}>
+                <Text style={styles.secondaryButtonText}>-25ms</Text>
+              </TouchableOpacity>
 
-          <TouchableOpacity style={styles.secondaryButton} onPress={disconnectFromHost}>
-            <Text style={styles.secondaryButtonText}>Disconnect</Text>
-          </TouchableOpacity>
+              <TouchableOpacity style={styles.halfSecondaryButton} onPress={() => adjustNodeDelay(25)}>
+                <Text style={styles.secondaryButtonText}>+25ms</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity style={styles.secondaryButton} onPress={resetNodeDelay}>
+              <Text style={styles.secondaryButtonText}>Reset Delay</Text>
+            </TouchableOpacity>
+          </View>
 
           <View style={styles.panel}>
-            {renderPanelHeader('Synced Playlist', 'Received from host')}
+            {renderPanelHeader('Synced Playlist Preview')}
             {playlist.length === 0 ? (
               <Text style={styles.logText}>No playlist received yet</Text>
             ) : (
@@ -1251,6 +1630,103 @@ export default function App() {
               })
             )}
           </View>
+
+          <View style={styles.panel}>
+            {renderPanelHeader('Node Status')}
+            <Text style={styles.label}>Status</Text>
+            <Text style={styles.status}>{status}</Text>
+
+            <Text style={styles.label}>Playback</Text>
+            <Text style={styles.status}>{nowPlayingText}</Text>
+            <Text style={styles.status}>Position: {playbackPositionText}</Text>
+
+            <Text style={styles.label}>Host clock offset</Text>
+            <Text style={styles.status}>{hostClockOffsetMs}ms</Text>
+
+            <Text style={styles.label}>Local delay</Text>
+            <Text style={styles.status}>{nodePlaybackDelayMs}ms</Text>
+
+            <Text style={styles.label}>Node Network Prefix</Text>
+            <Text style={styles.status}>{subnetPrefix}</Text>
+
+            <Text style={styles.label}>Last message</Text>
+            <Text style={styles.status}>{lastMessage}</Text>
+          </View>
+
+
+
+          <View style={styles.panel}>
+            {renderPanelHeader('Node Status')}
+            <Text style={styles.label}>Status</Text>
+            <Text style={styles.status}>{status}</Text>
+
+            <Text style={styles.label}>Playback</Text>
+            <Text style={styles.status}>{nowPlayingText}</Text>
+            <Text style={styles.status}>Position: {playbackPositionText}</Text>
+
+            <Text style={styles.label}>Host clock offset</Text>
+            <Text style={styles.status}>{hostClockOffsetMs}ms</Text>
+
+            <Text style={styles.label}>Local delay</Text>
+            <Text style={styles.status}>{nodePlaybackDelayMs}ms</Text>
+
+            <Text style={styles.label}>Node Network Prefix</Text>
+            <Text style={styles.status}>{subnetPrefix}</Text>
+
+            <Text style={styles.label}>Last message</Text>
+            <Text style={styles.status}>{lastMessage}</Text>
+          </View>
+
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={() => setShowNodeDebugTools(previous => !previous)}>
+            <Text style={styles.secondaryButtonText}>
+              {showNodeDebugTools ? 'Hide Developer Tools ▲' : 'Developer Tools ▼'}
+            </Text>
+          </TouchableOpacity>
+
+          {showNodeDebugTools ? (
+            <View style={styles.panel}>
+              {renderPanelHeader('Developer Tools')}
+
+              <Text style={styles.label}>Developer Manual Host IP</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Host IP address"
+                placeholderTextColor="#6d8f7b"
+                value={hostIp}
+                onChangeText={setHostIp}
+                autoCapitalize="none"
+                keyboardType="numbers-and-punctuation"
+              />
+
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() =>
+                  discoveredHost ? connectToHost(discoveredHost.ip) : connectToHost()
+                }>
+                <Text style={styles.secondaryButtonText}>Connect Using Manual IP</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.secondaryButton} onPress={scanSubnetForHost}>
+                <Text style={styles.secondaryButtonText}>
+                  {isScanning ? 'Scanning...' : 'Fallback Scan'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.button} onPress={playCachedSelectedTrack}>
+                <Text style={styles.buttonText}>Dev Play Cached Track ▶</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.button} onPress={sendAliveToHost}>
+                <Text style={styles.buttonText}>Send I'm Alive</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
+          <TouchableOpacity style={styles.secondaryButton} onPress={disconnectFromHost}>
+            <Text style={styles.secondaryButtonText}>Disconnect</Text>
+          </TouchableOpacity>
 
           {renderLog()}
 
@@ -1406,6 +1882,39 @@ const styles = StyleSheet.create({
     color: '#050505',
     fontSize: 13,
     fontWeight: '800',
+  },
+  trackMeta: {
+    color: '#b8ffd7',
+    fontSize: 11,
+    marginTop: 4,
+  },
+  trackMetaSelected: {
+    color: '#05220f',
+    fontSize: 11,
+    marginTop: 4,
+    fontWeight: '700',
+  },
+  trackMeterOuter: {
+    width: '100%',
+    height: 6,
+    borderRadius: 3,
+    borderWidth: 1,
+    borderColor: '#145f3b',
+    overflow: 'hidden',
+    marginTop: 5,
+  },
+  trackMeterOuterSelected: {
+    width: '100%',
+    height: 6,
+    borderRadius: 3,
+    borderWidth: 1,
+    borderColor: '#05220f',
+    overflow: 'hidden',
+    marginTop: 5,
+  },
+  trackMeterInner: {
+    height: '100%',
+    backgroundColor: '#00ff88',
   },
   debugToggle: {
     paddingVertical: 6,
