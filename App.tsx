@@ -1,3 +1,4 @@
+import AudioVisualiser from './src/components/AudioVisualiser';
 import React, {useEffect, useRef, useState} from 'react';
 import {
   Alert,
@@ -13,6 +14,11 @@ import {
 } from 'react-native';
 import TcpSocket from 'react-native-tcp-socket';
 import dgram from 'react-native-udp';
+
+type PartySocketBuffer = {
+  _partyBuffer?: string;
+};
+
 
 type Mode = 'home' | 'host' | 'node';
 
@@ -416,9 +422,9 @@ export default function App() {
       }, 300);
 
       socket.on('data', data => {
-        socket._partyBuffer = `${socket._partyBuffer || ''}${data.toString()}`;
-        const lines = socket._partyBuffer.split('\n');
-        socket._partyBuffer = lines.pop() || '';
+        (socket as unknown as PartySocketBuffer)._partyBuffer = `${(socket as unknown as PartySocketBuffer)._partyBuffer || ''}${data.toString()}`;
+        const lines = ((socket as unknown as PartySocketBuffer)._partyBuffer || '').split('\n');
+        (socket as unknown as PartySocketBuffer)._partyBuffer = lines.pop() || '';
 
         lines.forEach((message: string) => {
           if (!message.trim()) return;
@@ -467,7 +473,7 @@ export default function App() {
         addLog('Node disconnected');
       });
 
-      socket.on('error', error => {
+      (socket as any).on('error', (error: any) => {
         setStatus(`Socket error: ${String(error)}`);
         addLog(`Socket error: ${String(error)}`);
       });
@@ -520,7 +526,7 @@ export default function App() {
       }
     });
 
-    socket.on('error', error => {
+    (socket as any).on('error', (error: any) => {
       addLog(`UDP host error: ${String(error)}`);
     });
 
@@ -548,7 +554,7 @@ export default function App() {
 
     setIsScanning(true);
     setStatus('Scanning subnet for PartySpeaker host...');
-    addLog(`Starting TCP subnet scan on ${SUBNET_PREFIX}.x`);
+    addLog(`Starting TCP subnet scan on ${subnetPrefix}.x`);
 
     let found = false;
 
@@ -557,7 +563,7 @@ export default function App() {
         break;
       }
 
-      const ip = `${SUBNET_PREFIX}.${i}`;
+      const ip = `${subnetPrefix}.${i}`;
       setStatus(`Scanning ${ip}:${TCP_PORT}`);
 
       await new Promise<void>(resolve => {
@@ -571,7 +577,7 @@ export default function App() {
         };
 
         const socket = TcpSocket.createConnection(
-          {host: ip, port: TCP_PORT, timeout: 250},
+          {host: ip, port: TCP_PORT},
           () => {
             found = true;
             socket.destroy();
@@ -703,7 +709,7 @@ export default function App() {
       }
 
       setStatus(`Waiting for nodes to cache: ${track.name}`);
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise<void>(resolve => setTimeout(() => resolve(), 500));
     }
   };
 
@@ -834,7 +840,7 @@ export default function App() {
           setTrackProgress(selected.id, percent);
           setTransferProgressText(`Transferring ${selected.name}: ${percent}%`);
           setStatus(`Transferring ${selected.name}: ${i + 1}/${chunks.length}`);
-          await new Promise(resolve => setTimeout(resolve, 5));
+          await new Promise<void>(resolve => setTimeout(() => resolve(), 5));
         }
       }
 
@@ -1177,9 +1183,9 @@ export default function App() {
     };
 
     client.on('data', data => {
-      client._partyBuffer = `${client._partyBuffer || ''}${data.toString()}`;
-      const lines = client._partyBuffer.split('\n');
-      client._partyBuffer = lines.pop() || '';
+      (client as unknown as PartySocketBuffer)._partyBuffer = `${(client as unknown as PartySocketBuffer)._partyBuffer || ''}${data.toString()}`;
+      const lines = ((client as unknown as PartySocketBuffer)._partyBuffer || '').split('\n');
+      (client as unknown as PartySocketBuffer)._partyBuffer = lines.pop() || '';
 
       lines.forEach((message: string) => {
         if (message.trim()) {
@@ -1425,7 +1431,7 @@ export default function App() {
         <Text style={styles.status}>Level: {percent}%</Text>
 
         <View style={styles.meterOuter}>
-          <View style={[styles.meterInner, {width: barWidth}]} />
+          <View style={[styles.meterInner, {width: barWidth as any}]} />
         </View>
 
         <TouchableOpacity style={styles.button} onPress={startAudioCaptureTest}>
