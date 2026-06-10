@@ -2,6 +2,7 @@ import AudioVisualiser from './src/components/AudioVisualiser';
 import PanelHeader from './src/components/PanelHeader';
 import NodeDelayCalibration from './src/components/NodeDelayCalibration';
 import NodeStatusPanel from './src/components/NodeStatusPanel';
+import PlaylistPanel from './src/components/PlaylistPanel';
 import React, {useEffect, useRef, useState} from 'react';
 import {
   Alert,
@@ -1341,64 +1342,23 @@ export default function App() {
   );
 
   const renderPlaylistPanel = () => (
-    <View style={styles.panel}>
-      {renderPanelHeader('Playlist')}
-      <Text style={styles.status}>Selected: {currentTrackName}</Text>
-      <Text style={styles.status}>Playback: {nowPlayingText}</Text>
-      <Text style={styles.status}>Position: {playbackPositionText}</Text>
-      <Text style={styles.status}>{transferProgressText}</Text>
-
-      <View style={styles.meterOuter}>
-        <View style={[styles.meterInner, {width: `${transferProgress}%`}]} />
-      </View>
-
-      <TouchableOpacity style={styles.button} onPress={addTrack}>
-        <Text style={styles.buttonText}>Add Track ＋</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity style={styles.secondaryButton} onPress={removeSelectedTrack}>
-        <Text style={styles.secondaryButtonText}>Remove Selected Track</Text>
-      </TouchableOpacity>
-
-      <View style={styles.playlistBox}>
-        {playlist.length === 0 ? (
-          <Text style={styles.logText}>No tracks added yet</Text>
-        ) : (
-          playlist.map((track, index) => {
-            const selected = selectedTrackId === track.id;
-
-            return (
-              <TouchableOpacity
-                key={track.id}
-                style={selected ? styles.trackSelected : styles.trackRow}
-                onPress={() => {
-                  setSelectedTrackId(track.id);
-                  setCurrentTrackName(track.name);
-                  addLog(`Selected track: ${track.name}`);
-                  autoSyncAndTransfer(track, playlist, track.id);
-                }}>
-                <Text style={selected ? styles.trackTextSelected : styles.trackText}>
-                  {index + 1}. {track.name}
-                </Text>
-                <Text style={selected ? styles.trackMetaSelected : styles.trackMeta}>
-                  {trackTransferStatus[track.id] === 100
-                    ? 'Cached on nodes'
-                    : `Loading ${trackTransferStatus[track.id] || 0}%`}
-                </Text>
-                <View style={selected ? styles.trackMeterOuterSelected : styles.trackMeterOuter}>
-                  <View
-                    style={[
-                      styles.trackMeterInner,
-                      {width: `${trackTransferStatus[track.id] || 0}%`},
-                    ]}
-                  />
-                </View>
-              </TouchableOpacity>
-            );
-          })
-        )}
-      </View>
-    </View>
+    <PlaylistPanel
+      styles={styles}
+      currentTrackName={currentTrackName}
+      nowPlayingText={nowPlayingText}
+      playbackPositionText={playbackPositionText}
+      transferProgressText={transferProgressText}
+      transferProgress={transferProgress}
+      playlist={playlist}
+      selectedTrackId={selectedTrackId}
+      trackTransferStatus={trackTransferStatus}
+      addTrack={addTrack}
+      removeSelectedTrack={removeSelectedTrack}
+      setSelectedTrackId={setSelectedTrackId}
+      setCurrentTrackName={setCurrentTrackName}
+      addLog={addLog}
+      autoSyncAndTransfer={autoSyncAndTransfer}
+    />
   );
 
   const renderPartyControls = () => (
