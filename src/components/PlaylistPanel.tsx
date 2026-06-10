@@ -5,6 +5,7 @@ import PanelHeader from './PanelHeader';
 type Track = {
   id: string;
   name: string;
+  uri: string;
 };
 
 type Props = {
@@ -22,7 +23,7 @@ type Props = {
   setSelectedTrackId: (id: string) => void;
   setCurrentTrackName: (name: string) => void;
   addLog: (message: string) => void;
-  autoSyncAndTransfer: (track: Track, playlist: Track[], trackId: string) => void;
+  autoSyncAndTransfer: (track?: Track, playlistSnapshot?: Track[], selectedIdSnapshot?: string | null) => void;
 };
 
 export default function PlaylistPanel({
