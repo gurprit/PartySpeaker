@@ -1,5 +1,7 @@
 import AudioVisualiser from './src/components/AudioVisualiser';
 import PanelHeader from './src/components/PanelHeader';
+import NodeDelayCalibration from './src/components/NodeDelayCalibration';
+import NodeStatusPanel from './src/components/NodeStatusPanel';
 import React, {useEffect, useRef, useState} from 'react';
 import {
   Alert,
@@ -1583,27 +1585,16 @@ export default function App() {
             )}
           </View>
 
-          <View style={styles.panel}>
-            {renderPanelHeader('Node Status')}
-            <Text style={styles.label}>Status</Text>
-            <Text style={styles.status}>{status}</Text>
-
-            <Text style={styles.label}>Playback</Text>
-            <Text style={styles.status}>{nowPlayingText}</Text>
-            <Text style={styles.status}>Position: {playbackPositionText}</Text>
-
-            <Text style={styles.label}>Host clock offset</Text>
-            <Text style={styles.status}>{hostClockOffsetMs}ms</Text>
-
-            <Text style={styles.label}>Local delay</Text>
-            <Text style={styles.status}>{nodePlaybackDelayMs}ms</Text>
-
-            <Text style={styles.label}>Node Network Prefix</Text>
-            <Text style={styles.status}>{subnetPrefix}</Text>
-
-            <Text style={styles.label}>Last message</Text>
-            <Text style={styles.status}>{lastMessage}</Text>
-          </View>
+          <NodeStatusPanel
+            styles={styles}
+            status={status}
+            nowPlayingText={nowPlayingText}
+            playbackPositionText={playbackPositionText}
+            hostClockOffsetMs={hostClockOffsetMs}
+            nodePlaybackDelayMs={nodePlaybackDelayMs}
+            subnetPrefix={subnetPrefix}
+            lastMessage={lastMessage}
+          />
 
           <TouchableOpacity
             style={styles.secondaryButton}
@@ -1617,39 +1608,12 @@ export default function App() {
             <View style={styles.panel}>
               {renderPanelHeader('Developer Tools')}
 
-          <View style={styles.panel}>
-            {renderPanelHeader('Node Delay Calibration', 'Use this to line up speakers by ear')}
-            <Text style={styles.status}>
-              Delay: {nodePlaybackDelayMs}ms
-            </Text>
-            <Text style={styles.hint}>
-              Negative plays earlier. Positive plays later.
-            </Text>
-
-            <View style={styles.row}>
-              <TouchableOpacity style={styles.halfSecondaryButton} onPress={() => adjustNodeDelay(-100)}>
-                <Text style={styles.secondaryButtonText}>-100ms</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.halfSecondaryButton} onPress={() => adjustNodeDelay(100)}>
-                <Text style={styles.secondaryButtonText}>+100ms</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.row}>
-              <TouchableOpacity style={styles.halfSecondaryButton} onPress={() => adjustNodeDelay(-25)}>
-                <Text style={styles.secondaryButtonText}>-25ms</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.halfSecondaryButton} onPress={() => adjustNodeDelay(25)}>
-                <Text style={styles.secondaryButtonText}>+25ms</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity style={styles.secondaryButton} onPress={resetNodeDelay}>
-              <Text style={styles.secondaryButtonText}>Reset Delay</Text>
-            </TouchableOpacity>
-          </View>
+          <NodeDelayCalibration
+            styles={styles}
+            nodePlaybackDelayMs={nodePlaybackDelayMs}
+            adjustNodeDelay={adjustNodeDelay}
+            resetNodeDelay={resetNodeDelay}
+          />
 
 
 
