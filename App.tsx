@@ -3,6 +3,7 @@ import PanelHeader from './src/components/PanelHeader';
 import NodeDelayCalibration from './src/components/NodeDelayCalibration';
 import NodeStatusPanel from './src/components/NodeStatusPanel';
 import PlaylistPanel from './src/components/PlaylistPanel';
+import EventLog from './src/components/EventLog';
 import React, {useEffect, useRef, useState} from 'react';
 import {
   Alert,
@@ -1387,24 +1388,11 @@ export default function App() {
 
 
   const renderLog = () => (
-    <View style={styles.logPanel}>
-      <Text style={styles.label}>Event log</Text>
-      <ScrollView style={styles.logBox}>
-        {log.length === 0 ? (
-          <Text style={styles.logText}>No events yet</Text>
-        ) : (
-          log.map((item, index) => (
-            <Text key={`${item}-${index}`} style={styles.logText}>
-              {item}
-            </Text>
-          ))
-        )}
-      </ScrollView>
-
-      <TouchableOpacity style={styles.smallButton} onPress={clearLog}>
-        <Text style={styles.smallButtonText}>Clear Log</Text>
-      </TouchableOpacity>
-    </View>
+    <EventLog
+      styles={styles}
+      log={log}
+      clearLog={clearLog}
+    />
   );
 
   const renderDebugTools = () => (
