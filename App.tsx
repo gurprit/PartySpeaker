@@ -1420,30 +1420,7 @@ export default function App() {
     </View>
   );
 
-  const renderCapturePanel = () => {
-    const percent = Math.round(captureLevel * 100);
-    const barWidth = `${Math.min(100, percent)}%`;
 
-    return (
-      <View style={styles.debugPanel}>
-        {renderPanelHeader('Audio Capture Test')}
-        <Text style={styles.status}>Status: {captureStatus}</Text>
-        <Text style={styles.status}>Level: {percent}%</Text>
-
-        <View style={styles.meterOuter}>
-          <View style={[styles.meterInner, {width: barWidth as any}]} />
-        </View>
-
-        <TouchableOpacity style={styles.button} onPress={startAudioCaptureTest}>
-          <Text style={styles.buttonText}>Start Audio Capture Test</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.secondaryButton} onPress={stopAudioCaptureTest}>
-          <Text style={styles.secondaryButtonText}>Stop Audio Capture Test</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  };
 
   const renderLog = () => (
     <View style={styles.logPanel}>
@@ -1502,7 +1479,6 @@ export default function App() {
             <Text style={styles.buttonText}>Send Clip 🎶</Text>
           </TouchableOpacity>
 
-          {renderCapturePanel()}
 
           <TouchableOpacity style={styles.secondaryButton} onPress={playLocalBeep}>
             <Text style={styles.secondaryButtonText}>Test Local Beep</Text>
@@ -1578,39 +1554,7 @@ export default function App() {
             <Text style={styles.buttonText}>Join With Party Code</Text>
           </TouchableOpacity>
 
-          <View style={styles.panel}>
-            {renderPanelHeader('Node Delay Calibration', 'Use this to line up speakers by ear')}
-            <Text style={styles.status}>
-              Delay: {nodePlaybackDelayMs}ms
-            </Text>
-            <Text style={styles.hint}>
-              Negative plays earlier. Positive plays later.
-            </Text>
 
-            <View style={styles.row}>
-              <TouchableOpacity style={styles.halfSecondaryButton} onPress={() => adjustNodeDelay(-100)}>
-                <Text style={styles.secondaryButtonText}>-100ms</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.halfSecondaryButton} onPress={() => adjustNodeDelay(100)}>
-                <Text style={styles.secondaryButtonText}>+100ms</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.row}>
-              <TouchableOpacity style={styles.halfSecondaryButton} onPress={() => adjustNodeDelay(-25)}>
-                <Text style={styles.secondaryButtonText}>-25ms</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.halfSecondaryButton} onPress={() => adjustNodeDelay(25)}>
-                <Text style={styles.secondaryButtonText}>+25ms</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity style={styles.secondaryButton} onPress={resetNodeDelay}>
-              <Text style={styles.secondaryButtonText}>Reset Delay</Text>
-            </TouchableOpacity>
-          </View>
 
           <View style={styles.panel}>
             {renderPanelHeader('Synced Playlist Preview')}
@@ -1659,30 +1603,6 @@ export default function App() {
             <Text style={styles.status}>{lastMessage}</Text>
           </View>
 
-
-
-          <View style={styles.panel}>
-            {renderPanelHeader('Node Status')}
-            <Text style={styles.label}>Status</Text>
-            <Text style={styles.status}>{status}</Text>
-
-            <Text style={styles.label}>Playback</Text>
-            <Text style={styles.status}>{nowPlayingText}</Text>
-            <Text style={styles.status}>Position: {playbackPositionText}</Text>
-
-            <Text style={styles.label}>Host clock offset</Text>
-            <Text style={styles.status}>{hostClockOffsetMs}ms</Text>
-
-            <Text style={styles.label}>Local delay</Text>
-            <Text style={styles.status}>{nodePlaybackDelayMs}ms</Text>
-
-            <Text style={styles.label}>Node Network Prefix</Text>
-            <Text style={styles.status}>{subnetPrefix}</Text>
-
-            <Text style={styles.label}>Last message</Text>
-            <Text style={styles.status}>{lastMessage}</Text>
-          </View>
-
           <TouchableOpacity
             style={styles.secondaryButton}
             onPress={() => setShowNodeDebugTools(previous => !previous)}>
@@ -1694,6 +1614,42 @@ export default function App() {
           {showNodeDebugTools ? (
             <View style={styles.panel}>
               {renderPanelHeader('Developer Tools')}
+
+          <View style={styles.panel}>
+            {renderPanelHeader('Node Delay Calibration', 'Use this to line up speakers by ear')}
+            <Text style={styles.status}>
+              Delay: {nodePlaybackDelayMs}ms
+            </Text>
+            <Text style={styles.hint}>
+              Negative plays earlier. Positive plays later.
+            </Text>
+
+            <View style={styles.row}>
+              <TouchableOpacity style={styles.halfSecondaryButton} onPress={() => adjustNodeDelay(-100)}>
+                <Text style={styles.secondaryButtonText}>-100ms</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.halfSecondaryButton} onPress={() => adjustNodeDelay(100)}>
+                <Text style={styles.secondaryButtonText}>+100ms</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.row}>
+              <TouchableOpacity style={styles.halfSecondaryButton} onPress={() => adjustNodeDelay(-25)}>
+                <Text style={styles.secondaryButtonText}>-25ms</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.halfSecondaryButton} onPress={() => adjustNodeDelay(25)}>
+                <Text style={styles.secondaryButtonText}>+25ms</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity style={styles.secondaryButton} onPress={resetNodeDelay}>
+              <Text style={styles.secondaryButtonText}>Reset Delay</Text>
+            </TouchableOpacity>
+          </View>
+
+
 
               <Text style={styles.label}>Developer Manual Host IP</Text>
               <TextInput
@@ -1718,10 +1674,6 @@ export default function App() {
                 <Text style={styles.secondaryButtonText}>
                   {isScanning ? 'Scanning...' : 'Fallback Scan'}
                 </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.button} onPress={playCachedSelectedTrack}>
-                <Text style={styles.buttonText}>Dev Play Cached Track ▶</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.button} onPress={sendAliveToHost}>
