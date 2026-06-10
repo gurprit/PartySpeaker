@@ -1,6 +1,6 @@
 import React from 'react';
 import {View, Text, TouchableOpacity} from 'react-native';
-import PanelHeader from './PanelHeader';
+import PanelHeader from '../common/PanelHeader';
 
 type Props = {
   styles: any;

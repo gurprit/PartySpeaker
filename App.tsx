@@ -1,9 +1,9 @@
 import AudioVisualiser from './src/components/AudioVisualiser';
-import PanelHeader from './src/components/PanelHeader';
-import NodeDelayCalibration from './src/components/NodeDelayCalibration';
-import NodeStatusPanel from './src/components/NodeStatusPanel';
-import PlaylistPanel from './src/components/PlaylistPanel';
-import EventLog from './src/components/EventLog';
+import PanelHeader from './src/components/common/PanelHeader';
+import NodeDelayCalibration from './src/components/node/NodeDelayCalibration';
+import NodeStatusPanel from './src/components/node/NodeStatusPanel';
+import PlaylistPanel from './src/components/host/PlaylistPanel';
+import EventLog from './src/components/host/EventLog';
 import React, {useEffect, useRef, useState} from 'react';
 import {
   Alert,
