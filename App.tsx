@@ -1,4 +1,5 @@
 import AudioVisualiser from './src/components/AudioVisualiser';
+import PanelHeader from './src/components/PanelHeader';
 import React, {useEffect, useRef, useState} from 'react';
 import {
   Alert,
@@ -1320,10 +1321,11 @@ export default function App() {
   const clearLog = () => setLog([]);
 
   const renderPanelHeader = (title: string, subtitle?: string) => (
-    <View style={styles.panelHeader}>
-      <Text style={styles.panelTitle}>{title}</Text>
-      {subtitle ? <Text style={styles.panelSubtitle}>{subtitle}</Text> : null}
-    </View>
+    <PanelHeader
+      title={title}
+      subtitle={subtitle}
+      styles={styles}
+    />
   );
 
   const renderStatusPanel = () => (
