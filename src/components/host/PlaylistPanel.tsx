@@ -2,6 +2,7 @@ import React from 'react';
 import {View, Text, TouchableOpacity, Image} from 'react-native';
 import PanelHeader from '../common/PanelHeader';
 import AudioVisualiser from '../visualiser/AudioVisualiser';
+import NowPlayingArtwork from '../visualiser/NowPlayingArtwork';
 
 type Track = {
   id: string;
@@ -66,32 +67,7 @@ export default function PlaylistPanel({
           shadowRadius:20,
           elevation:8,
         }}>
-
-      <View
-        style={{
-          alignSelf:'center',
-          width:250,
-          height:250,
-          borderRadius:36,
-          backgroundColor:'#101510',
-          marginTop:20,
-          marginBottom:20,
-          overflow:'hidden',
-          justifyContent:'center',
-          alignItems:'center',
-          borderWidth:1,
-          borderColor:'rgba(57,255,20,0.55)'
-        }}>
-
-        <Text
-          style={{
-            color:'#39ff14',
-            fontSize:64
-          }}>
-          ◉
-        </Text>
-
-      </View>
+      <NowPlayingArtwork title={currentTrackName} />
 
       <Text
         style={{
