@@ -1,5 +1,5 @@
 import React from 'react';
-import {View, Text, TouchableOpacity} from 'react-native';
+import {View, Text, TouchableOpacity, Image} from 'react-native';
 import PanelHeader from '../common/PanelHeader';
 import AudioVisualiser from '../visualiser/AudioVisualiser';
 
@@ -50,8 +50,71 @@ export default function PlaylistPanel({
 
   return (
     <View style={styles.panel}>
-      {renderPanelHeader('Playlist')}
+      {renderPanelHeader('Now Playing')}
+
+      <View
+        style={{
+          marginTop:18,
+          marginBottom:24,
+          borderRadius:30,
+          padding:22,
+          backgroundColor:'rgba(255,255,255,0.04)',
+          borderWidth:1,
+          borderColor:'rgba(255,255,255,0.08)',
+          shadowColor:'#39ff14',
+          shadowOpacity:0.15,
+          shadowRadius:20,
+          elevation:8,
+        }}>
+
+      <View
+        style={{
+          alignSelf:'center',
+          width:250,
+          height:250,
+          borderRadius:36,
+          backgroundColor:'#222',
+          marginTop:20,
+          marginBottom:20,
+          overflow:'hidden',
+          justifyContent:'center',
+          alignItems:'center',
+          borderWidth:1,
+          borderColor:'#39ff14'
+        }}>
+
+        <Text
+          style={{
+            color:'#39ff14',
+            fontSize:64
+          }}>
+          🎵
+        </Text>
+
+      </View>
+
+      <Text
+        style={{
+          color:'white',
+          fontSize:32,
+          fontWeight:'700',
+          textAlign:'center',
+          marginBottom:4
+        }}>
+        {currentTrackName}
+      </Text>
+
+      <Text
+        style={{
+          color:'#aaa',
+          textAlign:'center',
+          marginBottom:12
+        }}>
+        Unknown Artist
+      </Text>
+
       <Text style={styles.status}>Selected: {currentTrackName}</Text>
+
       <Text style={styles.status}>Playback: {nowPlayingText}</Text>
       <Text style={styles.status}>Position: {playbackPositionText}</Text>
 
@@ -59,9 +122,21 @@ export default function PlaylistPanel({
         isActive={nowPlayingText.toLowerCase().includes('playing')}
       />
 
+      </View>
+
       <Text style={styles.status}>{transferProgressText}</Text>
 
-      <View style={styles.meterOuter}>
+
+      <View
+        style={{
+          height:8,
+          borderRadius:99,
+          overflow:'hidden',
+          backgroundColor:'#222',
+          marginTop:12,
+          marginBottom:18
+        }}>
+
         <View style={[styles.meterInner, {width: `${transferProgress}%`}]} />
       </View>
 
