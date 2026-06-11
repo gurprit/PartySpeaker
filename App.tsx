@@ -1342,6 +1342,69 @@ export default function App() {
     </View>
   );
 
+  const renderConnectedSpeakersPanel = () => (
+    <View style={styles.panel}>
+      {renderPanelHeader('Connected Speakers')}
+
+      <View
+        style={{
+          marginTop: 10,
+          padding: 16,
+          borderRadius: 22,
+          backgroundColor: 'rgba(57, 255, 20, 0.06)',
+          borderWidth: 1,
+          borderColor: 'rgba(57, 255, 20, 0.18)',
+        }}>
+        <Text
+          style={{
+            color: '#39ff14',
+            fontSize: 42,
+            fontWeight: '800',
+            textAlign: 'center',
+          }}>
+          {nodeCount}
+        </Text>
+
+        <Text
+          style={{
+            color: '#d7ffe1',
+            textAlign: 'center',
+            fontSize: 15,
+            marginTop: 2,
+          }}>
+          {nodeCount === 1 ? 'speaker connected' : 'speakers connected'}
+        </Text>
+
+        <View
+          style={{
+            height: 8,
+            borderRadius: 999,
+            overflow: 'hidden',
+            backgroundColor: 'rgba(255,255,255,0.08)',
+            marginTop: 16,
+          }}>
+          <View
+            style={{
+              height: '100%',
+              width: `${Math.min(100, nodeCount * 25)}%`,
+              backgroundColor: '#39ff14',
+            }}
+          />
+        </View>
+
+        <Text
+          style={{
+            color: '#8fcf9e',
+            textAlign: 'center',
+            marginTop: 12,
+            fontSize: 12,
+          }}>
+          Add more phones to make the party louder.
+        </Text>
+      </View>
+    </View>
+  );
+
   const renderPlaylistPanel = () => (
     <PlaylistPanel
       styles={styles}
@@ -1458,6 +1521,7 @@ export default function App() {
           <Text style={styles.text}>Control the playlist and speakers.</Text>
 
           {renderStatusPanel()}
+          {renderConnectedSpeakersPanel()}
 
           <TouchableOpacity style={styles.button} onPress={startHostServer}>
             <Text style={styles.buttonText}>Start Host Server</Text>
