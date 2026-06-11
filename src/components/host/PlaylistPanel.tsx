@@ -97,9 +97,12 @@ export default function PlaylistPanel({
       <AudioVisualiser
         isActive={
           currentTrackName.trim().length > 0 &&
-          currentTrackName !== 'No track selected' &&
-          !nowPlayingText.toLowerCase().includes('stopped') &&
-          !nowPlayingText.toLowerCase().includes('paused')
+          currentTrackName !== 'No track selected'
+        }
+        label={
+          currentTrackName.trim().length > 0 && currentTrackName !== 'No track selected'
+            ? 'Visualiser active'
+            : 'Select a track to wake visualiser'
         }
       />
 

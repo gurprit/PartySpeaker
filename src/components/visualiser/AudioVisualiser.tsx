@@ -1,8 +1,9 @@
 import React, {useEffect, useRef} from 'react';
-import {Animated, Easing, StyleSheet, View} from 'react-native';
+import {Animated, Easing, StyleSheet, Text, View} from 'react-native';
 
 type Props = {
   isActive: boolean;
+  label?: string;
 };
 
 const BAR_COUNT = 28;
@@ -14,7 +15,7 @@ const PATTERN = [
   0.84, 0.63, 0.46, 0.29, 0.21, 0.33, 0.56,
 ];
 
-export default function AudioVisualiser({isActive}: Props) {
+export default function AudioVisualiser({isActive, label}: Props) {
   const pulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -58,6 +59,10 @@ export default function AudioVisualiser({isActive}: Props) {
 
   return (
     <View style={styles.wrapper}>
+      <Text style={styles.statusLabel}>
+        {label || (isActive ? 'Visualiser active' : 'Visualiser waiting')}
+      </Text>
+
       <View style={styles.visualiser}>
         {PATTERN.map((base, index) => {
           const phaseOffset = (index % 7) / 10;
@@ -97,6 +102,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(57, 255, 20, 0.06)',
     borderWidth: 1,
     borderColor: 'rgba(57, 255, 20, 0.18)',
+  },
+  statusLabel: {
+    color: '#8fcf9e',
+    textAlign: 'center',
+    fontSize: 12,
+    marginBottom: 8,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
   visualiser: {
     height: 96,
