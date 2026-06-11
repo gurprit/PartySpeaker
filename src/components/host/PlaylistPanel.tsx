@@ -1,6 +1,7 @@
 import React from 'react';
 import {View, Text, TouchableOpacity} from 'react-native';
 import PanelHeader from '../common/PanelHeader';
+import AudioVisualiser from '../visualiser/AudioVisualiser';
 
 type Track = {
   id: string;
@@ -53,6 +54,11 @@ export default function PlaylistPanel({
       <Text style={styles.status}>Selected: {currentTrackName}</Text>
       <Text style={styles.status}>Playback: {nowPlayingText}</Text>
       <Text style={styles.status}>Position: {playbackPositionText}</Text>
+
+      <AudioVisualiser
+        isActive={nowPlayingText.toLowerCase().includes('playing')}
+      />
+
       <Text style={styles.status}>{transferProgressText}</Text>
 
       <View style={styles.meterOuter}>
