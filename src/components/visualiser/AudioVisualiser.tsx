@@ -1,5 +1,5 @@
-import React, {useEffect, useMemo, useRef} from 'react';
-import {Animated, StyleSheet, View} from 'react-native';
+import React, {useEffect, useRef} from 'react';
+import {Animated, Easing, StyleSheet, View} from 'react-native';
 
 type Props = {
   isActive: boolean;
@@ -7,59 +7,68 @@ type Props = {
 
 const BAR_COUNT = 28;
 
-export default function AudioVisualiser({isActive}: Props) {
-  const bars = useRef(
-    Array.from({length: BAR_COUNT}, () => new Animated.Value(0.2)),
-  ).current;
+const PATTERN = [
+  0.18, 0.28, 0.44, 0.66, 0.82, 0.95, 0.74,
+  0.52, 0.34, 0.24, 0.38, 0.62, 0.88, 1,
+  0.78, 0.58, 0.42, 0.31, 0.49, 0.71, 0.91,
+  0.84, 0.63, 0.46, 0.29, 0.21, 0.33, 0.56,
+];
 
-  const animations = useMemo(
-    () =>
-      bars.map((bar, index) =>
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(bar, {
-              toValue: 0.35 + Math.random() * 0.65,
-              duration: 180 + index * 8,
-              useNativeDriver: false,
-            }),
-            Animated.timing(bar, {
-              toValue: 0.15 + Math.random() * 0.35,
-              duration: 180 + index * 6,
-              useNativeDriver: false,
-            }),
-          ]),
-        ),
-      ),
-    [bars],
-  );
+export default function AudioVisualiser({isActive}: Props) {
+  const pulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (isActive) {
-      animations.forEach(animation => animation.start());
-    } else {
-      animations.forEach(animation => animation.stop());
+    let animation: Animated.CompositeAnimation | null = null;
 
-      bars.forEach(bar => {
-        Animated.timing(bar, {
-          toValue: 0.16,
-          duration: 250,
-          useNativeDriver: false,
-        }).start();
-      });
+    if (isActive) {
+      animation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulse, {
+            toValue: 1,
+            duration: 520,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: false,
+          }),
+          Animated.timing(pulse, {
+            toValue: 0,
+            duration: 520,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: false,
+          }),
+        ]),
+      );
+
+      animation.start();
+    } else {
+      pulse.stopAnimation();
+      Animated.timing(pulse, {
+        toValue: 0,
+        duration: 260,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: false,
+      }).start();
     }
 
     return () => {
-      animations.forEach(animation => animation.stop());
+      if (animation) {
+        animation.stop();
+      }
     };
-  }, [animations, bars, isActive]);
+  }, [isActive, pulse]);
 
   return (
     <View style={styles.wrapper}>
       <View style={styles.visualiser}>
-        {bars.map((bar, index) => {
-          const height = bar.interpolate({
+        {PATTERN.map((base, index) => {
+          const phaseOffset = (index % 7) / 10;
+          const boosted = Math.min(1, base + phaseOffset);
+
+          const height = pulse.interpolate({
             inputRange: [0, 1],
-            outputRange: [8, 76],
+            outputRange: [
+              10 + base * 28,
+              22 + boosted * 66,
+            ],
           });
 
           return (
@@ -90,7 +99,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(57, 255, 20, 0.18)',
   },
   visualiser: {
-    height: 88,
+    height: 96,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
