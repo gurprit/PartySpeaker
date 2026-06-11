@@ -73,14 +73,14 @@ export default function PlaylistPanel({
           width:250,
           height:250,
           borderRadius:36,
-          backgroundColor:'#222',
+          backgroundColor:'#101510',
           marginTop:20,
           marginBottom:20,
           overflow:'hidden',
           justifyContent:'center',
           alignItems:'center',
           borderWidth:1,
-          borderColor:'#39ff14'
+          borderColor:'rgba(57,255,20,0.55)'
         }}>
 
         <Text
@@ -88,7 +88,7 @@ export default function PlaylistPanel({
             color:'#39ff14',
             fontSize:64
           }}>
-          🎵
+          ◉
         </Text>
 
       </View>
@@ -119,7 +119,12 @@ export default function PlaylistPanel({
       <Text style={styles.status}>Position: {playbackPositionText}</Text>
 
       <AudioVisualiser
-        isActive={nowPlayingText.toLowerCase().includes('playing')}
+        isActive={
+          currentTrackName.trim().length > 0 &&
+          currentTrackName !== 'No track selected' &&
+          !nowPlayingText.toLowerCase().includes('stopped') &&
+          !nowPlayingText.toLowerCase().includes('paused')
+        }
       />
 
       </View>
@@ -132,7 +137,7 @@ export default function PlaylistPanel({
           height:8,
           borderRadius:99,
           overflow:'hidden',
-          backgroundColor:'#222',
+          backgroundColor:'#101510',
           marginTop:12,
           marginBottom:18
         }}>
