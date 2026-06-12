@@ -3,6 +3,7 @@ import {View, Text, TouchableOpacity, Image} from 'react-native';
 import PanelHeader from '../common/PanelHeader';
 import AudioVisualiser from '../visualiser/AudioVisualiser';
 import NowPlayingArtwork from '../visualiser/NowPlayingArtwork';
+import TrackInfo from '../visualiser/TrackInfo';
 
 type Track = {
   id: string;
@@ -67,27 +68,18 @@ export default function PlaylistPanel({
           shadowRadius:20,
           elevation:8,
         }}>
-      <NowPlayingArtwork title={currentTrackName} />
+      <NowPlayingArtwork
+        title={currentTrackName}
+        artworkUri={undefined}
+      />
 
-      <Text
-        style={{
-          color:'white',
-          fontSize:32,
-          fontWeight:'700',
-          textAlign:'center',
-          marginBottom:4
-        }}>
-        {currentTrackName}
-      </Text>
-
-      <Text
-        style={{
-          color:'#aaa',
-          textAlign:'center',
-          marginBottom:12
-        }}>
-        Unknown Artist
-      </Text>
+      <TrackInfo
+        metadata={{
+          title: currentTrackName,
+          artist: '',
+          album: '',
+        }}
+      />
 
       <Text style={styles.status}>Selected: {currentTrackName}</Text>
 
