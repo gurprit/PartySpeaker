@@ -1,0 +1,24 @@
+import {TrackMetadata} from '../types/TrackMetadata';
+
+export default class MetadataService {
+  static async getMetadata(
+    trackName: string,
+  ): Promise<TrackMetadata> {
+
+    // Placeholder implementation.
+    // Next update we'll replace this with real ID3 parsing.
+
+    const cleanName = trackName
+      .replace(/\.[^.]+$/, '')
+      .replace(/_/g, ' ')
+      .trim();
+
+    return {
+      title: cleanName,
+      artist: 'Unknown Artist',
+      album: 'Unknown Album',
+      artworkUri: undefined,
+      durationMs: undefined,
+    };
+  }
+}
