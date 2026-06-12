@@ -1,9 +1,10 @@
-import React, {useEffect, useRef} from 'react';
-import {Animated, Easing, StyleSheet, Text, View} from 'react-native';
+import React, {useEffect, useMemo, useState} from 'react';
+import {StyleSheet, Text, View} from 'react-native';
 
 type Props = {
   isActive: boolean;
   label?: string;
+  playbackPositionText?: string;
 };
 
 const BAR_COUNT = 28;
@@ -15,69 +16,69 @@ const PATTERN = [
   0.84, 0.63, 0.46, 0.29, 0.21, 0.33, 0.56,
 ];
 
-export default function AudioVisualiser({isActive, label}: Props) {
-  const pulse = useRef(new Animated.Value(0)).current;
+function parsePlaybackSeconds(value?: string): number {
+  if (!value) {
+    return 0;
+  }
+
+  const parts = value.split(':').map(part => Number(part.trim()));
+
+  if (parts.some(Number.isNaN)) {
+    return 0;
+  }
+
+  if (parts.length === 2) {
+    return parts[0] * 60 + parts[1];
+  }
+
+  if (parts.length === 3) {
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+
+  return 0;
+}
+
+export default function AudioVisualiser({
+  isActive,
+  label,
+  playbackPositionText,
+}: Props) {
+  const [frame, setFrame] = useState(0);
+
+  const playbackSeconds = useMemo(
+    () => parsePlaybackSeconds(playbackPositionText),
+    [playbackPositionText],
+  );
 
   useEffect(() => {
-    let animation: Animated.CompositeAnimation | null = null;
-
-    if (isActive) {
-      animation = Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulse, {
-            toValue: 1,
-            duration: 520,
-            easing: Easing.inOut(Easing.quad),
-            useNativeDriver: false,
-          }),
-          Animated.timing(pulse, {
-            toValue: 0,
-            duration: 520,
-            easing: Easing.inOut(Easing.quad),
-            useNativeDriver: false,
-          }),
-        ]),
-      );
-
-      animation.start();
-    } else {
-      pulse.stopAnimation();
-      Animated.timing(pulse, {
-        toValue: 0,
-        duration: 260,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: false,
-      }).start();
+    if (!isActive) {
+      setFrame(0);
+      return;
     }
 
-    return () => {
-      if (animation) {
-        animation.stop();
-      }
-    };
-  }, [isActive, pulse]);
+    const timer = setInterval(() => {
+      setFrame(previous => previous + 1);
+    }, 90);
+
+    return () => clearInterval(timer);
+  }, [isActive]);
 
   return (
     <View style={styles.wrapper}>
       <Text style={styles.statusLabel}>
-        {label || (isActive ? 'Visualiser active' : 'Visualiser waiting')}
+        {label || (isActive ? 'Visualiser synced to playback clock' : 'Visualiser waiting')}
       </Text>
 
       <View style={styles.visualiser}>
         {PATTERN.map((base, index) => {
-          const phaseOffset = (index % 7) / 10;
-          const boosted = Math.min(1, base + phaseOffset);
-
-          const height = pulse.interpolate({
-            inputRange: [0, 1],
-            outputRange: [
-              10 + base * 28,
-              22 + boosted * 66,
-            ],
-          });
+          const phase = playbackSeconds * 0.85 + frame * 0.18 + index * 0.55;
+          const wave = (Math.sin(phase) + 1) / 2;
+          const beat = (Math.sin(playbackSeconds * 2.4 + frame * 0.3) + 1) / 2;
+          const energy = isActive ? Math.min(1, base * 0.55 + wave * 0.35 + beat * 0.25) : 0.18;
+          const height = 10 + energy * 78;
 
           return (
-            <Animated.View
+            <View
               key={index}
               style={[
                 styles.bar,

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, {useEffect, useState} from 'react';
 import {View, Text, TouchableOpacity, Image} from 'react-native';
 import PanelHeader from '../common/PanelHeader';
 import AudioVisualiser from '../visualiser/AudioVisualiser';
@@ -76,8 +76,10 @@ export default function PlaylistPanel({
       <TrackInfo
         metadata={{
           title: currentTrackName,
-          artist: '',
-          album: '',
+          artist: 'Unknown Artist',
+          album: 'Unknown Album',
+          artworkUri: undefined,
+          durationMs: undefined,
         }}
       />
 
@@ -93,9 +95,10 @@ export default function PlaylistPanel({
         }
         label={
           currentTrackName.trim().length > 0 && currentTrackName !== 'No track selected'
-            ? 'Visualiser active'
+            ? 'Visualiser synced to playback clock'
             : 'Select a track to wake visualiser'
         }
+        playbackPositionText={playbackPositionText}
       />
 
       </View>
