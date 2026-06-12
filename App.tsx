@@ -1,9 +1,11 @@
-import AudioVisualiser from './src/components/AudioVisualiser';
 import PanelHeader from './src/components/common/PanelHeader';
 import NodeDelayCalibration from './src/components/node/NodeDelayCalibration';
 import NodeStatusPanel from './src/components/node/NodeStatusPanel';
 import PlaylistPanel from './src/components/host/PlaylistPanel';
 import EventLog from './src/components/host/EventLog';
+import NowPlayingArtwork from './src/components/visualiser/NowPlayingArtwork';
+import TrackInfo from './src/components/visualiser/TrackInfo';
+import AudioVisualiser from './src/components/visualiser/AudioVisualiser';
 import React, {useEffect, useRef, useState} from 'react';
 import {
   Alert,
@@ -1571,6 +1573,54 @@ export default function App() {
           </TouchableOpacity>
 
 
+
+          <View style={styles.panel}>
+            {renderPanelHeader('Now Playing')}
+
+            <View
+              style={{
+                marginTop: 18,
+                marginBottom: 24,
+                borderRadius: 30,
+                padding: 22,
+                backgroundColor: 'rgba(255,255,255,0.04)',
+                borderWidth: 1,
+                borderColor: 'rgba(255,255,255,0.08)',
+                shadowColor: '#39ff14',
+                shadowOpacity: 0.15,
+                shadowRadius: 20,
+                elevation: 8,
+              }}>
+              <NowPlayingArtwork
+                title={currentTrackName}
+                artworkUri={undefined}
+              />
+
+              <TrackInfo
+                metadata={{
+                  title: currentTrackName || 'Waiting for track',
+                  artist: 'Metadata from host coming next',
+                  album: 'Speaker Node',
+                }}
+              />
+
+              <Text style={styles.status}>Playback: {nowPlayingText}</Text>
+              <Text style={styles.status}>Position: {playbackPositionText}</Text>
+
+              <AudioVisualiser
+                isActive={
+                  currentTrackName.trim().length > 0 &&
+                  currentTrackName !== 'No track selected'
+                }
+                label={
+                  currentTrackName.trim().length > 0 && currentTrackName !== 'No track selected'
+                    ? 'Visualiser synced to playback clock'
+                    : 'Waiting for host playback'
+                }
+                playbackPositionText={playbackPositionText}
+              />
+            </View>
+          </View>
 
           <View style={styles.panel}>
             {renderPanelHeader('Synced Playlist Preview')}
