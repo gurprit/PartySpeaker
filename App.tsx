@@ -81,6 +81,7 @@ export default function App() {
     album: 'Unknown Album',
   });
   const [playbackLevel, setPlaybackLevel] = useState(0);
+  const [playbackBars, setPlaybackBars] = useState<number[]>([]);
   const [transferProgressText, setTransferProgressText] = useState('No transfer yet');
   const [transferProgress, setTransferProgress] = useState(0);
   const [trackTransferStatus, setTrackTransferStatus] = useState<Record<string, number>>({});
@@ -1460,6 +1461,7 @@ export default function App() {
       autoSyncAndTransfer={autoSyncAndTransfer}
       onMetadataChange={setCurrentTrackMetadata}
       playbackLevel={playbackLevel}
+      playbackBars={playbackBars}
     />
   );
 
@@ -1657,6 +1659,7 @@ export default function App() {
                 }
                 playbackPositionText={playbackPositionText}
                 playbackLevel={playbackLevel}
+                playbackBars={playbackBars}
               />
             </View>
           </View>
