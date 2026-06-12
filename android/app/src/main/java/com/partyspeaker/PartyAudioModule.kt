@@ -55,6 +55,8 @@ class PartyAudioModule(
     private var pickAudioPromise: Promise? = null
     private var currentPlayer: MediaPlayer? = null
     private var currentExoPlayer: ExoPlayer? = null
+    private var playbackLevelRunning = false
+    private val playbackLevelHandler = Handler(Looper.getMainLooper())
 
     private val activityEventListener: ActivityEventListener =
         object : BaseActivityEventListener() {
@@ -329,6 +331,7 @@ class PartyAudioModule(
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_READY) {
                         player.play()
+                        startPlaybackLevelEvents()
                         promise.resolve(true)
                     }
 
@@ -347,7 +350,55 @@ class PartyAudioModule(
         }
     }
 
+    private fun startPlaybackLevelEvents() {
+        if (playbackLevelRunning) {
+            return
+        }
+
+        playbackLevelRunning = true
+
+        val runnable = object : Runnable {
+            override fun run() {
+                val player = currentExoPlayer
+
+                if (!playbackLevelRunning || player == null) {
+                    playbackLevelRunning = false
+                    return
+                }
+
+                val position = player.currentPosition.coerceAtLeast(0L)
+
+                // Temporary deterministic level based on playback position.
+                // Next step: replace with true FFT/audio processor data.
+                val level = ((kotlin.math.sin(position / 130.0) + 1.0) / 2.0)
+                    .coerceIn(0.0, 1.0)
+
+                emitPlaybackLevel(level)
+
+                playbackLevelHandler.postDelayed(this, 50)
+            }
+        }
+
+        playbackLevelHandler.post(runnable)
+    }
+
+    private fun stopPlaybackLevelEvents() {
+        playbackLevelRunning = false
+        playbackLevelHandler.removeCallbacksAndMessages(null)
+    }
+
+    private fun emitPlaybackLevel(level: Double) {
+        val event = Arguments.createMap()
+        event.putDouble("level", level)
+
+        reactContext
+            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+            .emit("PartyPlaybackLevel", event)
+    }
+
     private fun stopCurrentPlayer() {
+        stopPlaybackLevelEvents()
+
         try {
             currentPlayer?.stop()
         } catch (_: Exception) {}
@@ -398,6 +449,7 @@ class PartyAudioModule(
                         resolved = true
                         player.seekTo(positionMs.toLong().coerceAtLeast(0L))
                         player.play()
+                        startPlaybackLevelEvents()
                         promise.resolve(true)
                     }
 
