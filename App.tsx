@@ -6,6 +6,7 @@ import EventLog from './src/components/host/EventLog';
 import NowPlayingArtwork from './src/components/visualiser/NowPlayingArtwork';
 import TrackInfo from './src/components/visualiser/TrackInfo';
 import AudioVisualiser from './src/components/visualiser/AudioVisualiser';
+import {TrackMetadata} from './src/types/TrackMetadata';
 import React, {useEffect, useRef, useState} from 'react';
 import {
   Alert,
@@ -73,6 +74,12 @@ export default function App() {
   const [playlist, setPlaylist] = useState<Track[]>([]);
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
   const [currentTrackName, setCurrentTrackName] = useState('None');
+
+  const [currentTrackMetadata, setCurrentTrackMetadata] = useState<TrackMetadata>({
+    title: '',
+    artist: 'Unknown Artist',
+    album: 'Unknown Album',
+  });
   const [transferProgressText, setTransferProgressText] = useState('No transfer yet');
   const [transferProgress, setTransferProgress] = useState(0);
   const [trackTransferStatus, setTrackTransferStatus] = useState<Record<string, number>>({});
@@ -1003,6 +1010,17 @@ export default function App() {
         }
       }
 
+      if (message.startsWith('METADATA|')) {
+        try {
+          const metadata = JSON.parse(message.replace('METADATA|', '')) as TrackMetadata;
+          setCurrentTrackMetadata(metadata);
+          addLog(`Metadata received: ${metadata.title}`);
+        } catch (error) {
+          addLog(`Metadata parse error: ${String(error)}`);
+        }
+        return;
+      }
+
       if (message.startsWith('NOW_PLAYING|')) {
         try {
           const payload = JSON.parse(message.replace('NOW_PLAYING|', ''));
@@ -1326,6 +1344,21 @@ export default function App() {
 
   const clearLog = () => setLog([]);
 
+  useEffect(() => {
+    if (mode !== 'host') {
+      return;
+    }
+
+    if (!currentTrackMetadata.title) {
+      return;
+    }
+
+    clientsRef.current.forEach(socket => {
+      writeSocket(socket, `METADATA|${JSON.stringify(currentTrackMetadata)}`);
+    });
+  }, [currentTrackMetadata, mode]);
+
+
   const renderPanelHeader = (title: string, subtitle?: string) => (
     <PanelHeader
       title={title}
@@ -1424,6 +1457,7 @@ export default function App() {
       setCurrentTrackName={setCurrentTrackName}
       addLog={addLog}
       autoSyncAndTransfer={autoSyncAndTransfer}
+      onMetadataChange={setCurrentTrackMetadata}
     />
   );
 
@@ -1592,15 +1626,17 @@ export default function App() {
                 elevation: 8,
               }}>
               <NowPlayingArtwork
-                title={currentTrackName}
-                artworkUri={undefined}
+                title={currentTrackMetadata.title || currentTrackName}
+                artworkUri={currentTrackMetadata.artworkUri}
               />
 
               <TrackInfo
                 metadata={{
-                  title: currentTrackName || 'Waiting for track',
-                  artist: 'Metadata from host coming next',
-                  album: 'Speaker Node',
+                  title: currentTrackMetadata.title || currentTrackName || 'Waiting for track',
+                  artist: currentTrackMetadata.artist || 'Waiting for metadata',
+                  album: currentTrackMetadata.album || 'Speaker Node',
+                  artworkUri: currentTrackMetadata.artworkUri,
+                  durationMs: currentTrackMetadata.durationMs,
                 }}
               />
 

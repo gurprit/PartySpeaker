@@ -29,6 +29,7 @@ type Props = {
   setCurrentTrackName: (name: string) => void;
   addLog: (message: string) => void;
   autoSyncAndTransfer: (track?: Track, playlistSnapshot?: Track[], selectedIdSnapshot?: string | null) => void;
+  onMetadataChange?: (metadata: import('../../types/TrackMetadata').TrackMetadata) => void;
 };
 
 export default function PlaylistPanel({
@@ -49,6 +50,7 @@ export default function PlaylistPanel({
   setCurrentTrackName,
   addLog,
   autoSyncAndTransfer,
+  onMetadataChange,
 }: Props) {
   const [metadata, setMetadata] = React.useState<TrackMetadata>({
     title: '',
@@ -71,6 +73,7 @@ export default function PlaylistPanel({
     ).then(result => {
       if (mounted) {
         setMetadata(result);
+        onMetadataChange?.(result);
       }
     });
 
