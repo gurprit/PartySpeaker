@@ -1,7 +1,34 @@
+import MetadataNative from '../native/MetadataNative';
 import {TrackMetadata} from '../types/TrackMetadata';
 
 export default class MetadataService {
-  static async getMetadata(trackName: string): Promise<TrackMetadata> {
+  static async getMetadata(
+    trackName: string,
+    trackUri?: string,
+  ): Promise<TrackMetadata> {
+    const fallback = MetadataService.fromFilename(trackName);
+
+    if (!trackUri || !MetadataNative) {
+      return fallback;
+    }
+
+    try {
+      const nativeMetadata = await MetadataNative.read(trackUri);
+
+      return {
+        title: nativeMetadata.title?.trim() || fallback.title,
+        artist: nativeMetadata.artist?.trim() || fallback.artist,
+        album: nativeMetadata.album?.trim() || fallback.album,
+        artworkUri: nativeMetadata.artworkUri || undefined,
+        durationMs: nativeMetadata.durationMs || undefined,
+      };
+    } catch (error) {
+      console.warn('Metadata read failed:', error);
+      return fallback;
+    }
+  }
+
+  private static fromFilename(trackName: string): TrackMetadata {
     const cleanName = MetadataService.cleanFilename(trackName);
     const parsed = MetadataService.parseArtistAndTitle(cleanName);
 
@@ -35,10 +62,7 @@ export default class MetadataService {
         const title = titleParts.join(separator).trim();
 
         if (artist && title) {
-          return {
-            artist,
-            title,
-          };
+          return {artist, title};
         }
       }
     }

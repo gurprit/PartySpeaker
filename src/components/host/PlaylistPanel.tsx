@@ -4,6 +4,8 @@ import PanelHeader from '../common/PanelHeader';
 import AudioVisualiser from '../visualiser/AudioVisualiser';
 import NowPlayingArtwork from '../visualiser/NowPlayingArtwork';
 import TrackInfo from '../visualiser/TrackInfo';
+import MetadataService from '../../services/MetadataService';
+import {TrackMetadata} from '../../types/TrackMetadata';
 
 type Track = {
   id: string;
@@ -30,6 +32,8 @@ type Props = {
 };
 
 export default function PlaylistPanel({
+
+
   styles,
   currentTrackName,
   nowPlayingText,
@@ -46,9 +50,34 @@ export default function PlaylistPanel({
   addLog,
   autoSyncAndTransfer,
 }: Props) {
+  const [metadata, setMetadata] = React.useState<TrackMetadata>({
+    title: '',
+    artist: 'Unknown Artist',
+    album: 'Unknown Album',
+  });
+
   const renderPanelHeader = (title: string, subtitle?: string) => (
     <PanelHeader title={title} subtitle={subtitle} styles={styles} />
   );
+
+  const selectedTrackForMetadata = playlist.find(track => track.id === selectedTrackId);
+
+  React.useEffect(() => {
+    let mounted = true;
+
+    MetadataService.getMetadata(
+      selectedTrackForMetadata?.name || currentTrackName,
+      selectedTrackForMetadata?.uri,
+    ).then(result => {
+      if (mounted) {
+        setMetadata(result);
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, [currentTrackName, selectedTrackForMetadata?.name, selectedTrackForMetadata?.uri]);
 
   return (
     <View style={styles.panel}>
@@ -69,18 +98,12 @@ export default function PlaylistPanel({
           elevation:8,
         }}>
       <NowPlayingArtwork
-        title={currentTrackName}
-        artworkUri={undefined}
+        title={metadata.title || currentTrackName}
+        artworkUri={metadata.artworkUri}
       />
 
       <TrackInfo
-        metadata={{
-          title: currentTrackName,
-          artist: 'Unknown Artist',
-          album: 'Unknown Album',
-          artworkUri: undefined,
-          durationMs: undefined,
-        }}
+        metadata={metadata}
       />
 
       <Text style={styles.status}>Selected: {currentTrackName}</Text>
