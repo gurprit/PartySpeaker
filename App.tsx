@@ -80,6 +80,7 @@ export default function App() {
     artist: 'Unknown Artist',
     album: 'Unknown Album',
   });
+  const [playbackLevel, setPlaybackLevel] = useState(0);
   const [transferProgressText, setTransferProgressText] = useState('No transfer yet');
   const [transferProgress, setTransferProgress] = useState(0);
   const [trackTransferStatus, setTrackTransferStatus] = useState<Record<string, number>>({});
@@ -1458,6 +1459,7 @@ export default function App() {
       addLog={addLog}
       autoSyncAndTransfer={autoSyncAndTransfer}
       onMetadataChange={setCurrentTrackMetadata}
+      playbackLevel={playbackLevel}
     />
   );
 
@@ -1654,6 +1656,7 @@ export default function App() {
                     : 'Waiting for host playback'
                 }
                 playbackPositionText={playbackPositionText}
+                playbackLevel={playbackLevel}
               />
             </View>
           </View>

@@ -5,6 +5,7 @@ type Props = {
   isActive: boolean;
   label?: string;
   playbackPositionText?: string;
+  playbackLevel?: number;
 };
 
 const BAR_COUNT = 28;
@@ -42,6 +43,7 @@ export default function AudioVisualiser({
   isActive,
   label,
   playbackPositionText,
+  playbackLevel,
 }: Props) {
   const [frame, setFrame] = useState(0);
 
@@ -74,7 +76,13 @@ export default function AudioVisualiser({
           const phase = playbackSeconds * 0.85 + frame * 0.18 + index * 0.55;
           const wave = (Math.sin(phase) + 1) / 2;
           const beat = (Math.sin(playbackSeconds * 2.4 + frame * 0.3) + 1) / 2;
-          const energy = isActive ? Math.min(1, base * 0.55 + wave * 0.35 + beat * 0.25) : 0.18;
+          const liveLevel = typeof playbackLevel === 'number'
+            ? Math.max(0, Math.min(1, playbackLevel))
+            : beat;
+
+          const energy = isActive
+            ? Math.min(1, base * 0.35 + wave * 0.25 + liveLevel * 0.55)
+            : 0.18;
           const height = 10 + energy * 78;
 
           return (

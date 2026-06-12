@@ -30,6 +30,7 @@ type Props = {
   addLog: (message: string) => void;
   autoSyncAndTransfer: (track?: Track, playlistSnapshot?: Track[], selectedIdSnapshot?: string | null) => void;
   onMetadataChange?: (metadata: import('../../types/TrackMetadata').TrackMetadata) => void;
+  playbackLevel?: number;
 };
 
 export default function PlaylistPanel({
@@ -51,6 +52,7 @@ export default function PlaylistPanel({
   addLog,
   autoSyncAndTransfer,
   onMetadataChange,
+  playbackLevel,
 }: Props) {
   const [metadata, setMetadata] = React.useState<TrackMetadata>({
     title: '',
@@ -125,6 +127,7 @@ export default function PlaylistPanel({
             : 'Select a track to wake visualiser'
         }
         playbackPositionText={playbackPositionText}
+        playbackLevel={playbackLevel}
       />
 
       </View>
