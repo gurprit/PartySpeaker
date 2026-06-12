@@ -110,6 +110,27 @@ export default function PlaylistPanel({
 
       <Text style={styles.status}>{transferProgressText}</Text>
 
+      <View
+        style={{
+          marginTop: 12,
+          padding: 12,
+          borderRadius: 16,
+          backgroundColor: 'rgba(255,255,255,0.035)',
+          borderWidth: 1,
+          borderColor: 'rgba(255,255,255,0.07)',
+        }}>
+        <Text
+          style={{
+            color: '#8fcf9e',
+            fontSize: 12,
+            lineHeight: 18,
+            textAlign: 'center',
+          }}>
+          Visualiser test: select a track and confirm the bars move.
+          Album art: placeholder only for now. Real MP3 artwork comes next.
+        </Text>
+      </View>
+
 
       <View
         style={{
