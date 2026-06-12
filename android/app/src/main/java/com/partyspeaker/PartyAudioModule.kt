@@ -24,6 +24,9 @@ import java.net.NetworkInterface
 import android.os.Looper
 import android.provider.OpenableColumns
 import androidx.core.content.ContextCompat
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
 import com.facebook.react.bridge.ActivityEventListener
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.BaseActivityEventListener
@@ -51,6 +54,7 @@ class PartyAudioModule(
     private var capturePromise: Promise? = null
     private var pickAudioPromise: Promise? = null
     private var currentPlayer: MediaPlayer? = null
+    private var currentExoPlayer: ExoPlayer? = null
 
     private val activityEventListener: ActivityEventListener =
         object : BaseActivityEventListener() {
@@ -316,33 +320,28 @@ class PartyAudioModule(
                 return
             }
 
-            val player = MediaPlayer()
-            currentPlayer = player
+            val player = ExoPlayer.Builder(reactContext).build()
+            currentExoPlayer = player
 
-            player.setAudioStreamType(AudioManager.STREAM_MUSIC)
-            player.setDataSource(file.absolutePath)
+            player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
 
-            player.setOnPreparedListener {
-                it.start()
-                promise.resolve(true)
-            }
+            player.addListener(object : Player.Listener {
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == Player.STATE_READY) {
+                        player.play()
+                        promise.resolve(true)
+                    }
 
-            player.setOnCompletionListener {
-                it.release()
-                if (currentPlayer === it) {
-                    currentPlayer = null
+                    if (playbackState == Player.STATE_ENDED) {
+                        player.release()
+                        if (currentExoPlayer === player) {
+                            currentExoPlayer = null
+                        }
+                    }
                 }
-            }
+            })
 
-            player.setOnErrorListener { mediaPlayer, _, _ ->
-                mediaPlayer.release()
-                if (currentPlayer === mediaPlayer) {
-                    currentPlayer = null
-                }
-                true
-            }
-
-            player.prepareAsync()
+            player.prepare()
         } catch (error: Exception) {
             promise.reject("PLAY_CACHED_TRACK_ERROR", error)
         }
@@ -358,6 +357,16 @@ class PartyAudioModule(
         } catch (_: Exception) {}
 
         currentPlayer = null
+
+        try {
+            currentExoPlayer?.stop()
+        } catch (_: Exception) {}
+
+        try {
+            currentExoPlayer?.release()
+        } catch (_: Exception) {}
+
+        currentExoPlayer = null
     }
 
 
@@ -376,41 +385,32 @@ class PartyAudioModule(
                 return
             }
 
-            val player = MediaPlayer()
-            currentPlayer = player
+            val player = ExoPlayer.Builder(reactContext).build()
+            currentExoPlayer = player
 
-            player.setAudioStreamType(AudioManager.STREAM_MUSIC)
-            player.setDataSource(file.absolutePath)
+            player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
 
-            player.setOnPreparedListener {
-                val seekToMs = positionMs.toInt().coerceAtLeast(0)
+            var resolved = false
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    it.seekTo(seekToMs.toLong(), MediaPlayer.SEEK_CLOSEST)
-                } else {
-                    it.seekTo(seekToMs)
+            player.addListener(object : Player.Listener {
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == Player.STATE_READY && !resolved) {
+                        resolved = true
+                        player.seekTo(positionMs.toLong().coerceAtLeast(0L))
+                        player.play()
+                        promise.resolve(true)
+                    }
+
+                    if (playbackState == Player.STATE_ENDED) {
+                        player.release()
+                        if (currentExoPlayer === player) {
+                            currentExoPlayer = null
+                        }
+                    }
                 }
+            })
 
-                it.start()
-                promise.resolve(true)
-            }
-
-            player.setOnCompletionListener {
-                it.release()
-                if (currentPlayer === it) {
-                    currentPlayer = null
-                }
-            }
-
-            player.setOnErrorListener { mediaPlayer, _, _ ->
-                mediaPlayer.release()
-                if (currentPlayer === mediaPlayer) {
-                    currentPlayer = null
-                }
-                true
-            }
-
-            player.prepareAsync()
+            player.prepare()
         } catch (error: Exception) {
             promise.reject("PLAY_CACHED_TRACK_FROM_ERROR", error)
         }
