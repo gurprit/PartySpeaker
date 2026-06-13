@@ -1,0 +1,27 @@
+--------- beginning of system
+06-13 22:30:51.027 I/ActivityManager( 1427): Start proc 22638:com.partyspeaker/u0a355 for next-top-activity {com.partyspeaker/com.partyspeaker.MainActivity}
+--------- beginning of main
+06-13 22:30:52.188 I/ReactNativeJS(22638): Running "PartySpeaker" with {"rootTag":1,"initialProps":{},"fabric":true}
+06-13 22:30:52.526 W/ReactNativeJS(22638): SafeAreaView has been deprecated and will be removed in a future release. Please use 'react-native-safe-area-context' instead. See https://github.com/AppAndFlow/react-native-safe-area-context
+--------- beginning of crash
+06-13 22:31:40.889 E/AndroidRuntime(22638): FATAL EXCEPTION: main
+06-13 22:31:40.889 E/AndroidRuntime(22638): Process: com.partyspeaker, PID: 22638
+06-13 22:31:40.889 E/AndroidRuntime(22638): java.lang.IllegalStateException: Player is accessed on the wrong thread.
+06-13 22:31:40.889 E/AndroidRuntime(22638): Current thread: 'main'
+06-13 22:31:40.889 E/AndroidRuntime(22638): Expected thread: 'mqt_v_native'
+06-13 22:31:40.889 E/AndroidRuntime(22638): See https://developer.android.com/guide/topics/media/issues/player-accessed-on-wrong-thread
+06-13 22:31:40.889 E/AndroidRuntime(22638): 	at androidx.media3.exoplayer.ExoPlayerImpl.verifyApplicationThread(ExoPlayerImpl.java:3113)
+06-13 22:31:40.889 E/AndroidRuntime(22638): 	at androidx.media3.exoplayer.ExoPlayerImpl.getCurrentPosition(ExoPlayerImpl.java:1218)
+06-13 22:31:40.889 E/AndroidRuntime(22638): 	at com.partyspeaker.PartyAudioModule$startPlaybackLevelEvents$runnable$1.run(PartyAudioModule.kt:393)
+06-13 22:31:40.889 E/AndroidRuntime(22638): 	at android.os.Handler.handleCallback(Handler.java:1095)
+06-13 22:31:40.889 E/AndroidRuntime(22638): 	at android.os.Handler.dispatchMessageImpl(Handler.java:135)
+06-13 22:31:40.889 E/AndroidRuntime(22638): 	at android.os.Handler.dispatchMessage(Handler.java:125)
+06-13 22:31:40.889 E/AndroidRuntime(22638): 	at android.os.Looper.loopOnce(Looper.java:269)
+06-13 22:31:40.889 E/AndroidRuntime(22638): 	at android.os.Looper.loop(Looper.java:367)
+06-13 22:31:40.889 E/AndroidRuntime(22638): 	at android.app.ActivityThread.main(ActivityThread.java:9333)
+06-13 22:31:40.889 E/AndroidRuntime(22638): 	at java.lang.reflect.Method.invoke(Native Method)
+06-13 22:31:40.889 E/AndroidRuntime(22638): 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:566)
+06-13 22:31:40.889 E/AndroidRuntime(22638): 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:929)
+06-13 22:31:41.058 I/ActivityManager( 1427): Process com.partyspeaker (pid 22638) has died: fg  TOP 
+06-13 22:31:41.087 W/ActivityManager( 1427): setHasOverlayUi called on unknown pid: 22638
+06-13 22:31:42.128 W/ActivityManager( 1427): pid 1427 system sent binder code 7 with flags 1 and got error -32

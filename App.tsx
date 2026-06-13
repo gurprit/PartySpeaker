@@ -1347,6 +1347,11 @@ export default function App() {
   const clearLog = () => setLog([]);
 
   useEffect(() => {
+    PartyAudio.setPlaybackVisualizerEnabled?.(mode === 'host').catch(() => {});
+  }, [mode]);
+
+
+  useEffect(() => {
     if (mode !== 'host') {
       return;
     }
