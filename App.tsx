@@ -1012,6 +1012,18 @@ export default function App() {
         }
       }
 
+      if (message.startsWith('VISUAL_LEVEL|')) {
+        try {
+          const payload = JSON.parse(message.replace('VISUAL_LEVEL|', ''));
+          if (typeof payload.level === 'number') {
+            setPlaybackLevel(Math.max(0, Math.min(1, payload.level)));
+          }
+        } catch (error) {
+          addLog(`Visual level parse error: ${String(error)}`);
+        }
+        return;
+      }
+
       if (message.startsWith('METADATA|')) {
         try {
           const metadata = JSON.parse(message.replace('METADATA|', '')) as TrackMetadata;
@@ -1349,6 +1361,17 @@ export default function App() {
   useEffect(() => {
     PartyAudio.setPlaybackVisualizerEnabled?.(mode === 'host').catch(() => {});
   }, [mode]);
+
+
+  useEffect(() => {
+    if (mode !== 'host') {
+      return;
+    }
+
+    clientsRef.current.forEach(socket => {
+      writeSocket(socket, `VISUAL_LEVEL|${JSON.stringify({level: playbackLevel})}`);
+    });
+  }, [mode, playbackLevel]);
 
 
   useEffect(() => {
