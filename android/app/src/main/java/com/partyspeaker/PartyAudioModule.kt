@@ -14,7 +14,6 @@ import android.media.MediaPlayer
 import android.media.ToneGenerator
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
-import android.media.audiofx.Visualizer
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -56,9 +55,9 @@ class PartyAudioModule(
     private var pickAudioPromise: Promise? = null
     private var currentPlayer: MediaPlayer? = null
     private var currentExoPlayer: ExoPlayer? = null
-    private var playbackVisualizer: Visualizer? = null
+    private var playbackVisualizerEnabled = false
     private var playbackLevelRunning = false
-    private val playbackLevelHandler = Handler(Looper.getMainLooper())
+    private var playbackLevelHandler: Handler? = null
 
     private val activityEventListener: ActivityEventListener =
         object : BaseActivityEventListener() {
@@ -311,6 +310,13 @@ class PartyAudioModule(
 
     @ReactMethod
     fun playCachedTrack(trackId: String, fileName: String, promise: Promise) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post {
+                playCachedTrack(trackId, fileName, promise)
+            }
+            return
+        }
+
         try {
             stopCurrentPlayer()
 
@@ -324,7 +330,7 @@ class PartyAudioModule(
                 return
             }
 
-            val player = ExoPlayer.Builder(reactContext).build()
+            val player = ExoPlayer.Builder(reactContext).setLooper(Looper.getMainLooper()).build()
             currentExoPlayer = player
 
             player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
@@ -356,115 +362,23 @@ class PartyAudioModule(
         }
     }
 
-    private fun startRealPlaybackVisualizer(audioSessionId: Int) {
-        stopRealPlaybackVisualizer()
+    @ReactMethod
+    fun setPlaybackVisualizerEnabled(enabled: Boolean, promise: Promise) {
+        playbackVisualizerEnabled = enabled
 
-        try {
-            if (audioSessionId == 0) {
-                return
-            }
-
-            val visualizer = Visualizer(audioSessionId)
-            playbackVisualizer = visualizer
-
-            visualizer.captureSize = Visualizer.getCaptureSizeRange()[1]
-
-            visualizer.setDataCaptureListener(
-                object : Visualizer.OnDataCaptureListener {
-                    override fun onWaveFormDataCapture(
-                        visualizer: Visualizer?,
-                        waveform: ByteArray?,
-                        samplingRate: Int
-                    ) {
-                        if (waveform == null || waveform.isEmpty()) {
-                            return
-                        }
-
-                        var sum = 0.0
-
-                        for (sample in waveform) {
-                            val centred = sample.toInt()
-                            sum += centred * centred
-                        }
-
-                        val rms = kotlin.math.sqrt(sum / waveform.size.toDouble())
-                        val level = (rms / 128.0).coerceIn(0.0, 1.0)
-
-                        emitPlaybackLevel(level)
-                    }
-
-                    override fun onFftDataCapture(
-                        visualizer: Visualizer?,
-                        fft: ByteArray?,
-                        samplingRate: Int
-                    ) {
-                        if (fft == null || fft.size < 4) {
-                            return
-                        }
-
-                        val bandCount = 28
-                        val bars = Arguments.createArray()
-                        val usableBins = fft.size / 2
-                        val binsPerBand = (usableBins / bandCount).coerceAtLeast(1)
-
-                        for (band in 0 until bandCount) {
-                            var magnitudeSum = 0.0
-                            var count = 0
-
-                            val startBin = band * binsPerBand
-                            val endBin = ((band + 1) * binsPerBand).coerceAtMost(usableBins)
-
-                            for (bin in startBin until endBin) {
-                                val realIndex = bin * 2
-                                val imagIndex = realIndex + 1
-
-                                if (imagIndex < fft.size) {
-                                    val real = fft[realIndex].toInt()
-                                    val imag = fft[imagIndex].toInt()
-                                    val magnitude = kotlin.math.sqrt((real * real + imag * imag).toDouble())
-                                    magnitudeSum += magnitude
-                                    count += 1
-                                }
-                            }
-
-                            val average = if (count > 0) magnitudeSum / count else 0.0
-                            val normalized = (average / 96.0).coerceIn(0.0, 1.0)
-                            bars.pushDouble(normalized)
-                        }
-
-                        emitPlaybackBars(bars)
-                    }
-                },
-                Visualizer.getMaxCaptureRate() / 2,
-                true,
-                true
-            )
-
-            visualizer.enabled = true
-        } catch (error: Exception) {
-            emitCaptureStatus("Playback visualizer error: ${error.message}")
+        if (!enabled) {
+            stopRealPlaybackVisualizer()
         }
+
+        promise.resolve(true)
+    }
+
+    private fun startRealPlaybackVisualizer(audioSessionId: Int) {
+        // Disabled for now. Android Visualizer caused crashes on real speaker nodes.
     }
 
     private fun stopRealPlaybackVisualizer() {
-        try {
-            playbackVisualizer?.enabled = false
-        } catch (_: Exception) {}
-
-        try {
-            playbackVisualizer?.release()
-        } catch (_: Exception) {}
-
-        playbackVisualizer = null
-    }
-
-    private fun emitPlaybackBars(bars: com.facebook.react.bridge.WritableArray) {
-        val event = Arguments.createMap()
-        event.putArray("bars", bars)
-
-        reactContext
-            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-            .emit("PartyPlaybackVisuals", event)
+        // Disabled for now.
     }
 
     private fun startPlaybackLevelEvents() {
@@ -492,16 +406,18 @@ class PartyAudioModule(
 
                 emitPlaybackLevel(level)
 
-                playbackLevelHandler.postDelayed(this, 50)
+                playbackLevelHandler?.postDelayed(this, 50)
             }
         }
 
-        playbackLevelHandler.post(runnable)
+        playbackLevelHandler = Handler(Looper.getMainLooper())
+        playbackLevelHandler?.post(runnable)
     }
 
     private fun stopPlaybackLevelEvents() {
         playbackLevelRunning = false
-        playbackLevelHandler.removeCallbacksAndMessages(null)
+        playbackLevelHandler?.removeCallbacksAndMessages(null)
+        playbackLevelHandler = null
     }
 
     private fun emitPlaybackLevel(level: Double) {
@@ -514,6 +430,13 @@ class PartyAudioModule(
     }
 
     private fun stopCurrentPlayer() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post {
+                stopCurrentPlayer()
+            }
+            return
+        }
+
         stopPlaybackLevelEvents()
         stopRealPlaybackVisualizer()
 
@@ -541,6 +464,13 @@ class PartyAudioModule(
 
     @ReactMethod
     fun playCachedTrackFrom(trackId: String, fileName: String, positionMs: Double, promise: Promise) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post {
+                playCachedTrackFrom(trackId, fileName, positionMs, promise)
+            }
+            return
+        }
+
         try {
             stopCurrentPlayer()
 
@@ -554,7 +484,7 @@ class PartyAudioModule(
                 return
             }
 
-            val player = ExoPlayer.Builder(reactContext).build()
+            val player = ExoPlayer.Builder(reactContext).setLooper(Looper.getMainLooper()).build()
             currentExoPlayer = player
 
             player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
