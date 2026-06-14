@@ -1,11 +1,19 @@
-import React, {useEffect, useState} from 'react';
-import {View, Text, TouchableOpacity, Image} from 'react-native';
-import PanelHeader from '../common/PanelHeader';
-import AudioVisualiser from '../visualiser/AudioVisualiser';
-import NowPlayingArtwork from '../visualiser/NowPlayingArtwork';
-import TrackInfo from '../visualiser/TrackInfo';
+import React from 'react';
+import {
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+
 import MetadataService from '../../services/MetadataService';
 import {TrackMetadata} from '../../types/TrackMetadata';
+import NowPlayingArtwork from '../visualiser/NowPlayingArtwork';
+import TrackInfo from '../visualiser/TrackInfo';
+import PartyButton from '../ui/PartyButton';
+import PartyCard from '../ui/PartyCard';
+import SectionLabel from '../ui/SectionLabel';
+import {partyTheme} from '../ui/PartyTheme';
 
 type Track = {
   id: string;
@@ -22,20 +30,22 @@ type Props = {
   transferProgress: number;
   playlist: Track[];
   selectedTrackId: string | null;
-  trackTransferStatus: Record<string, number>;
-  addTrack: () => void;
-  removeSelectedTrack: () => void;
-  setSelectedTrackId: (id: string) => void;
+  setSelectedTrackId: (trackId: string) => void;
   setCurrentTrackName: (name: string) => void;
   addLog: (message: string) => void;
-  autoSyncAndTransfer: (track?: Track, playlistSnapshot?: Track[], selectedIdSnapshot?: string | null) => void;
-  onMetadataChange?: (metadata: import('../../types/TrackMetadata').TrackMetadata) => void;
+  trackTransferStatus: Record<string, number | undefined>;
+  addTrack: () => void;
+  removeSelectedTrack: () => void;
+  autoSyncAndTransfer: (
+    track?: Track,
+    playlistSnapshot?: Track[],
+    selectedIdSnapshot?: string | null,
+  ) => void;
+  onMetadataChange?: (metadata: TrackMetadata) => void;
+  playbackLevel?: number;
 };
 
 export default function PlaylistPanel({
-
-
-  styles,
   currentTrackName,
   nowPlayingText,
   playbackPositionText,
@@ -43,12 +53,12 @@ export default function PlaylistPanel({
   transferProgress,
   playlist,
   selectedTrackId,
-  trackTransferStatus,
-  addTrack,
-  removeSelectedTrack,
   setSelectedTrackId,
   setCurrentTrackName,
   addLog,
+  trackTransferStatus,
+  addTrack,
+  removeSelectedTrack,
   autoSyncAndTransfer,
   onMetadataChange,
 }: Props) {
@@ -57,10 +67,6 @@ export default function PlaylistPanel({
     artist: 'Unknown Artist',
     album: 'Unknown Album',
   });
-
-  const renderPanelHeader = (title: string, subtitle?: string) => (
-    <PanelHeader title={title} subtitle={subtitle} styles={styles} />
-  );
 
   const selectedTrackForMetadata = playlist.find(track => track.id === selectedTrackId);
 
@@ -80,138 +86,276 @@ export default function PlaylistPanel({
     return () => {
       mounted = false;
     };
-  }, [currentTrackName, selectedTrackForMetadata?.name, selectedTrackForMetadata?.uri]);
+  }, [
+    currentTrackName,
+    selectedTrackForMetadata?.name,
+    selectedTrackForMetadata?.uri,
+    onMetadataChange,
+  ]);
+
+  const selectedTrack = selectedTrackForMetadata;
+  const selectedTransfer = selectedTrack
+    ? trackTransferStatus[selectedTrack.id] || 0
+    : 0;
 
   return (
-    <View style={styles.panel}>
-      {renderPanelHeader('Now Playing')}
+    <View style={localStyles.container}>
+      <SectionLabel>Now Playing</SectionLabel>
 
-      <View
-        style={{
-          marginTop:18,
-          marginBottom:24,
-          borderRadius:30,
-          padding:22,
-          backgroundColor:'rgba(255,255,255,0.04)',
-          borderWidth:1,
-          borderColor:'rgba(255,255,255,0.08)',
-          shadowColor:'#39ff14',
-          shadowOpacity:0.15,
-          shadowRadius:20,
-          elevation:8,
-        }}>
-      <NowPlayingArtwork
-        title={metadata.title || currentTrackName}
-        artworkUri={metadata.artworkUri}
-      />
+      <PartyCard style={localStyles.nowPlayingCard}>
+        <NowPlayingArtwork
+          title={metadata.title || currentTrackName}
+          artworkUri={metadata.artworkUri}
+        />
 
-      <TrackInfo
-        metadata={metadata}
-      />
+        <TrackInfo metadata={metadata} />
 
-      <Text style={styles.status}>Selected: {currentTrackName}</Text>
+        <View style={localStyles.progressRow}>
+          <Text style={localStyles.timeText}>{playbackPositionText}</Text>
 
-      <Text style={styles.status}>Playback: {nowPlayingText}</Text>
-      <Text style={styles.status}>Position: {playbackPositionText}</Text>
+          <View style={localStyles.progressOuter}>
+            <View
+              style={[
+                localStyles.progressInner,
+                {
+                  width: `${Math.max(4, Math.min(100, transferProgress || selectedTransfer))}%`,
+                },
+              ]}
+            />
+          </View>
 
-      <AudioVisualiser
-        isActive={
-          currentTrackName.trim().length > 0 &&
-          currentTrackName !== 'No track selected'
-        }
-        label={
-          currentTrackName.trim().length > 0 && currentTrackName !== 'No track selected'
-            ? 'Visualiser synced to playback clock'
-            : 'Select a track to wake visualiser'
-        }
-        playbackPositionText={playbackPositionText}
-      />
+          <Text style={localStyles.timeText}>--:--</Text>
+        </View>
 
-      </View>
+        <View style={localStyles.controlsRow}>
+          <Text style={localStyles.controlIcon}>↭</Text>
+          <Text style={localStyles.controlIcon}>‹‹</Text>
 
-      <Text style={styles.status}>{transferProgressText}</Text>
+          <TouchableOpacity style={localStyles.playButton} activeOpacity={0.8}>
+            <Text style={localStyles.playButtonText}>Ⅱ</Text>
+          </TouchableOpacity>
 
-      <View
-        style={{
-          marginTop: 12,
-          padding: 12,
-          borderRadius: 16,
-          backgroundColor: 'rgba(255,255,255,0.035)',
-          borderWidth: 1,
-          borderColor: 'rgba(255,255,255,0.07)',
-        }}>
-        <Text
-          style={{
-            color: '#8fcf9e',
-            fontSize: 12,
-            lineHeight: 18,
-            textAlign: 'center',
-          }}>
-          Visualiser test: select a track and confirm the bars move.
-          Album art: placeholder only for now. Real MP3 artwork comes next.
+          <Text style={localStyles.controlIcon}>››</Text>
+          <Text style={localStyles.controlIcon}>↻</Text>
+        </View>
+
+        <Text style={localStyles.statusText}>{nowPlayingText}</Text>
+        <Text style={localStyles.statusText}>{transferProgressText}</Text>
+      </PartyCard>
+
+      <View style={localStyles.sectionHeaderRow}>
+        <SectionLabel>Playlist</SectionLabel>
+        <Text style={localStyles.countText}>
+          {playlist.length} {playlist.length === 1 ? 'Track' : 'Tracks'}
         </Text>
       </View>
 
-
-      <View
-        style={{
-          height:8,
-          borderRadius:99,
-          overflow:'hidden',
-          backgroundColor:'#101510',
-          marginTop:12,
-          marginBottom:18
-        }}>
-
-        <View style={[styles.meterInner, {width: `${transferProgress}%`}]} />
-      </View>
-
-      <TouchableOpacity style={styles.button} onPress={addTrack}>
-        <Text style={styles.buttonText}>Add Track ＋</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity style={styles.secondaryButton} onPress={removeSelectedTrack}>
-        <Text style={styles.secondaryButtonText}>Remove Selected Track</Text>
-      </TouchableOpacity>
-
-      <View style={styles.playlistBox}>
+      <View style={localStyles.playlistBox}>
         {playlist.length === 0 ? (
-          <Text style={styles.logText}>No tracks added yet</Text>
+          <PartyCard>
+            <Text style={localStyles.emptyText}>No tracks added yet</Text>
+          </PartyCard>
         ) : (
           playlist.map((track, index) => {
             const selected = selectedTrackId === track.id;
+            const progress = trackTransferStatus[track.id] || 0;
 
             return (
               <TouchableOpacity
                 key={track.id}
-                style={selected ? styles.trackSelected : styles.trackRow}
+                activeOpacity={0.82}
+                style={[
+                  localStyles.trackRow,
+                  selected ? localStyles.trackRowSelected : null,
+                ]}
                 onPress={() => {
                   setSelectedTrackId(track.id);
                   setCurrentTrackName(track.name);
                   addLog(`Selected track: ${track.name}`);
                   autoSyncAndTransfer(track, playlist, track.id);
                 }}>
-                <Text style={selected ? styles.trackTextSelected : styles.trackText}>
-                  {index + 1}. {track.name}
-                </Text>
-                <Text style={selected ? styles.trackMetaSelected : styles.trackMeta}>
-                  {trackTransferStatus[track.id] === 100
-                    ? 'Cached on nodes'
-                    : `Loading ${trackTransferStatus[track.id] || 0}%`}
-                </Text>
-                <View style={selected ? styles.trackMeterOuterSelected : styles.trackMeterOuter}>
-                  <View
-                    style={[
-                      styles.trackMeterInner,
-                      {width: `${trackTransferStatus[track.id] || 0}%`},
-                    ]}
-                  />
+                <Text style={localStyles.trackIndex}>{index + 1}</Text>
+
+                <View style={localStyles.trackArtworkMini}>
+                  <Text style={localStyles.trackArtworkText}>
+                    {track.name.trim()[0]?.toUpperCase() || '♪'}
+                  </Text>
                 </View>
+
+                <View style={localStyles.trackTextWrap}>
+                  <Text style={localStyles.trackTitle} numberOfLines={1}>
+                    {track.name.replace(/\.[^.]+$/, '')}
+                  </Text>
+
+                  <Text style={localStyles.trackMeta} numberOfLines={1}>
+                    {progress >= 100 ? 'Cached on speakers' : `Loading ${progress}%`}
+                  </Text>
+                </View>
+
+                <Text style={localStyles.moreIcon}>⋮</Text>
               </TouchableOpacity>
             );
           })
         )}
       </View>
+
+      <View style={localStyles.actionsRow}>
+        <PartyButton
+          title="＋  Add Track"
+          onPress={addTrack}
+          variant="secondary"
+          style={localStyles.actionButton}
+        />
+
+        <PartyButton
+          title="⌫  Remove Track"
+          onPress={removeSelectedTrack}
+          variant="secondary"
+          style={localStyles.actionButton}
+        />
+      </View>
     </View>
-  )
+  );
 }
+
+const localStyles = StyleSheet.create({
+  container: {
+    gap: 16,
+  },
+  nowPlayingCard: {
+    padding: 18,
+  },
+  progressRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  progressOuter: {
+    flex: 1,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    overflow: 'hidden',
+  },
+  progressInner: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: partyTheme.white,
+  },
+  timeText: {
+    color: partyTheme.muted,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  controlsRow: {
+    marginTop: 28,
+    marginBottom: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  controlIcon: {
+    color: partyTheme.white,
+    fontSize: 34,
+    fontWeight: '800',
+  },
+  playButton: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: partyTheme.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playButtonText: {
+    color: partyTheme.black,
+    fontSize: 32,
+    fontWeight: '900',
+  },
+  statusText: {
+    color: partyTheme.muted,
+    fontSize: 13,
+    marginTop: 4,
+  },
+  sectionHeaderRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  countText: {
+    color: partyTheme.muted,
+    fontSize: 14,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  playlistBox: {
+    gap: 10,
+  },
+  emptyText: {
+    color: partyTheme.muted,
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  trackRow: {
+    minHeight: 88,
+    borderRadius: 18,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    backgroundColor: partyTheme.card,
+    borderColor: partyTheme.border,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  trackRowSelected: {
+    backgroundColor: partyTheme.white,
+  },
+  trackIndex: {
+    color: partyTheme.white,
+    fontSize: 24,
+    fontWeight: '900',
+    width: 28,
+  },
+  trackArtworkMini: {
+    width: 54,
+    height: 54,
+    borderRadius: 12,
+    backgroundColor: partyTheme.cardStrong,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  trackArtworkText: {
+    color: partyTheme.white,
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  trackTextWrap: {
+    flex: 1,
+  },
+  trackTitle: {
+    color: partyTheme.white,
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  trackMeta: {
+    color: partyTheme.muted,
+    fontSize: 14,
+    marginTop: 3,
+  },
+  moreIcon: {
+    color: partyTheme.muted,
+    fontSize: 28,
+    fontWeight: '900',
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    gap: 14,
+    marginTop: 8,
+  },
+  actionButton: {
+    flex: 1,
+  },
+});
