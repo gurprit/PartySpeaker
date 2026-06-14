@@ -5,13 +5,11 @@ type Props = {
   isActive: boolean;
   label?: string;
   playbackPositionText?: string;
-  playbackLevel?: number;
-  playbackBars?: number[];
 };
 
 const BAR_COUNT = 28;
 
-const FALLBACK_PATTERN = [
+const PATTERN = [
   0.18, 0.28, 0.44, 0.66, 0.82, 0.95, 0.74,
   0.52, 0.34, 0.24, 0.38, 0.62, 0.88, 1,
   0.78, 0.58, 0.42, 0.31, 0.49, 0.71, 0.91,
@@ -44,8 +42,6 @@ export default function AudioVisualiser({
   isActive,
   label,
   playbackPositionText,
-  playbackLevel,
-  playbackBars,
 }: Props) {
   const [frame, setFrame] = useState(0);
 
@@ -67,36 +63,19 @@ export default function AudioVisualiser({
     return () => clearInterval(timer);
   }, [isActive]);
 
-  const hasRealBars = Array.isArray(playbackBars) && playbackBars.length > 0;
-
   return (
     <View style={styles.wrapper}>
       <Text style={styles.statusLabel}>
-        {label ||
-          (hasRealBars
-            ? 'Real audio spectrum'
-            : isActive
-              ? 'Visualiser waiting for audio spectrum'
-              : 'Visualiser waiting')}
+        {label || (isActive ? 'Visualiser active' : 'Visualiser waiting')}
       </Text>
 
       <View style={styles.visualiser}>
-        {Array.from({length: BAR_COUNT}).map((_, index) => {
-          const liveBar = hasRealBars
-            ? Math.max(0, Math.min(1, playbackBars?.[index] ?? 0))
-            : undefined;
-
-          const base = FALLBACK_PATTERN[index] ?? 0.2;
+        {PATTERN.map((base, index) => {
           const phase = playbackSeconds * 0.85 + frame * 0.18 + index * 0.55;
           const wave = (Math.sin(phase) + 1) / 2;
           const beat = (Math.sin(playbackSeconds * 2.4 + frame * 0.3) + 1) / 2;
-          const liveLevel =
-            typeof playbackLevel === 'number'
-              ? Math.max(0, Math.min(1, playbackLevel))
-              : beat;
-
           const energy = isActive
-            ? liveBar ?? Math.min(1, base * 0.35 + wave * 0.25 + liveLevel * 0.55)
+            ? Math.min(1, base * 0.35 + wave * 0.3 + beat * 0.35)
             : 0.18;
 
           const height = 10 + energy * 82;

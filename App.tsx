@@ -80,8 +80,6 @@ export default function App() {
     artist: 'Unknown Artist',
     album: 'Unknown Album',
   });
-  const [playbackLevel, setPlaybackLevel] = useState(0);
-  const [playbackBars, setPlaybackBars] = useState<number[]>([]);
   const [transferProgressText, setTransferProgressText] = useState('No transfer yet');
   const [transferProgress, setTransferProgress] = useState(0);
   const [trackTransferStatus, setTrackTransferStatus] = useState<Record<string, number>>({});
@@ -1012,18 +1010,6 @@ export default function App() {
         }
       }
 
-      if (message.startsWith('VISUAL_LEVEL|')) {
-        try {
-          const payload = JSON.parse(message.replace('VISUAL_LEVEL|', ''));
-          if (typeof payload.level === 'number') {
-            setPlaybackLevel(Math.max(0, Math.min(1, payload.level)));
-          }
-        } catch (error) {
-          addLog(`Visual level parse error: ${String(error)}`);
-        }
-        return;
-      }
-
       if (message.startsWith('METADATA|')) {
         try {
           const metadata = JSON.parse(message.replace('METADATA|', '')) as TrackMetadata;
@@ -1368,17 +1354,6 @@ export default function App() {
       return;
     }
 
-    clientsRef.current.forEach(socket => {
-      writeSocket(socket, `VISUAL_LEVEL|${JSON.stringify({level: playbackLevel})}`);
-    });
-  }, [mode, playbackLevel]);
-
-
-  useEffect(() => {
-    if (mode !== 'host') {
-      return;
-    }
-
     if (!currentTrackMetadata.title) {
       return;
     }
@@ -1488,8 +1463,6 @@ export default function App() {
       addLog={addLog}
       autoSyncAndTransfer={autoSyncAndTransfer}
       onMetadataChange={setCurrentTrackMetadata}
-      playbackLevel={playbackLevel}
-      playbackBars={playbackBars}
     />
   );
 
@@ -1686,9 +1659,7 @@ export default function App() {
                     : 'Waiting for host playback'
                 }
                 playbackPositionText={playbackPositionText}
-                playbackLevel={playbackLevel}
-                playbackBars={playbackBars}
-              />
+                                  />
             </View>
           </View>
 
