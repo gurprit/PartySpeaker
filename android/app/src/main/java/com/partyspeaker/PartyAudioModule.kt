@@ -374,12 +374,14 @@ class PartyAudioModule(
     }
 
     private fun startRealPlaybackVisualizer(audioSessionId: Int) {
-        // Disabled for now. Android Visualizer caused crashes on real speaker nodes.
+        // Disabled. Host visualiser uses generated synced bars for now.
     }
 
     private fun stopRealPlaybackVisualizer() {
-        // Disabled for now.
+        // Disabled.
     }
+
+
 
     private fun startPlaybackLevelEvents() {
         if (playbackLevelRunning) {
@@ -418,6 +420,15 @@ class PartyAudioModule(
         playbackLevelRunning = false
         playbackLevelHandler?.removeCallbacksAndMessages(null)
         playbackLevelHandler = null
+    }
+
+    private fun emitPlaybackBars(bars: com.facebook.react.bridge.WritableArray) {
+        val event = Arguments.createMap()
+        event.putArray("bars", bars)
+
+        reactContext
+            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+            .emit("PartyPlaybackVisuals", event)
     }
 
     private fun emitPlaybackLevel(level: Double) {
