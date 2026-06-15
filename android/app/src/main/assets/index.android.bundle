@@ -101794,13 +101794,13 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     });
     var renderDebugTools = () => /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
       style: styles.panel,
-      children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
-        style: styles.debugToggle,
+      children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_PartyButton.default, {
+        title: showDebugTools ? 'Hide Debug Tools ▲' : 'Show Debug Tools ▼',
         onPress: () => setShowDebugTools(previous => !previous),
-        children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-          style: styles.debugToggleText,
-          children: showDebugTools ? 'Hide Debug Tools ▲' : 'Show Debug Tools ▼'
-        })
+        variant: "secondary",
+        style: {
+          width: '100%'
+        }
       }), showDebugTools ? /*#__PURE__*/(0, _jsxRuntime.jsxs)(_jsxRuntime.Fragment, {
         children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
           style: styles.button,
@@ -101873,20 +101873,22 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         style: styles.screen,
         children: /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.ScrollView, {
           contentContainerStyle: styles.scrollContent,
-          children: [renderStatusPanel(), renderPlaylistPanel(), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
-            style: styles.secondaryButton,
+          children: [renderStatusPanel(), renderPlaylistPanel(), /*#__PURE__*/(0, _jsxRuntime.jsx)(_PartyButton.default, {
+            title: "Stop Hosting",
             onPress: stopHostServer,
-            children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-              style: styles.secondaryButtonText,
-              children: "Stop Host Server"
-            })
-          }), renderDebugTools(), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
-            style: styles.secondaryButton,
+            variant: "secondary",
+            style: {
+              width: '100%',
+              marginTop: 18
+            }
+          }), renderDebugTools(), /*#__PURE__*/(0, _jsxRuntime.jsx)(_PartyButton.default, {
+            title: "Back",
             onPress: () => setMode('home'),
-            children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-              style: styles.secondaryButtonText,
-              children: "Back"
-            })
+            variant: "secondary",
+            style: {
+              width: '100%',
+              marginTop: 28
+            }
           })]
         })
       });
@@ -102044,13 +102046,14 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
               style: styles.secondaryButtonText,
               children: "Disconnect"
             })
-          }), renderLog(), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
-            style: styles.secondaryButton,
+          }), renderLog(), /*#__PURE__*/(0, _jsxRuntime.jsx)(_PartyButton.default, {
+            title: "Back",
             onPress: () => setMode('home'),
-            children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-              style: styles.secondaryButtonText,
-              children: "Back"
-            })
+            variant: "secondary",
+            style: {
+              width: '100%',
+              marginTop: 28
+            }
           })]
         })
       });
@@ -102734,12 +102737,12 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
         style: localStyles.actionsRow,
         children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_PartyButton.default, {
-          title: "\uFF0B  Add Track",
+          title: "\uFF0B Add Track",
           onPress: addTrack,
           variant: "secondary",
           style: localStyles.actionButton
         }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_PartyButton.default, {
-          title: "\u232B  Remove Track",
+          title: "\u232B Remove",
           onPress: removeSelectedTrack,
           variant: "secondary",
           style: localStyles.actionButton
@@ -102901,7 +102904,8 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       marginTop: 8
     },
     actionButton: {
-      flex: 1
+      flex: 1,
+      minHeight: 72
     }
   });
 },614,[1,14,71,2,615,619,620,621,623,624,182,622],"src/components/host/PlaylistPanel.tsx");

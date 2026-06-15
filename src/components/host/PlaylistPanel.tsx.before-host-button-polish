@@ -243,14 +243,14 @@ export default function PlaylistPanel({
 
       <View style={localStyles.actionsRow}>
         <PartyButton
-          title="＋ Add Track"
+          title="＋  Add Track"
           onPress={addTrack}
           variant="secondary"
           style={localStyles.actionButton}
         />
 
         <PartyButton
-          title="⌫ Remove"
+          title="⌫  Remove Track"
           onPress={removeSelectedTrack}
           variant="secondary"
           style={localStyles.actionButton}
@@ -415,6 +415,5 @@ const localStyles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
-    minHeight: 72,
   },
 });

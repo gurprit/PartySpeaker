@@ -1569,12 +1569,13 @@ export default function App() {
 
   const renderDebugTools = () => (
     <View style={styles.panel}>
-      <PartyButton
-        title={showDebugTools ? 'Hide Debug Tools ▲' : 'Show Debug Tools ▼'}
-        onPress={() => setShowDebugTools(previous => !previous)}
-        variant="secondary"
-        style={{width: '100%'}}
-      />
+      <TouchableOpacity
+        style={styles.debugToggle}
+        onPress={() => setShowDebugTools(previous => !previous)}>
+        <Text style={styles.debugToggleText}>
+          {showDebugTools ? 'Hide Debug Tools ▲' : 'Show Debug Tools ▼'}
+        </Text>
+      </TouchableOpacity>
 
       {showDebugTools ? (
         <>
@@ -1628,21 +1629,15 @@ export default function App() {
           {renderStatusPanel()}
           {renderPlaylistPanel()}
 
-          <PartyButton
-            title="Stop Hosting"
-            onPress={stopHostServer}
-            variant="secondary"
-            style={{width: '100%', marginTop: 18}}
-          />
+          <TouchableOpacity style={styles.secondaryButton} onPress={stopHostServer}>
+            <Text style={styles.secondaryButtonText}>Stop Host Server</Text>
+          </TouchableOpacity>
 
           {renderDebugTools()}
 
-          <PartyButton
-            title="Back"
-            onPress={() => setMode('home')}
-            variant="secondary"
-            style={{width: '100%', marginTop: 28}}
-          />
+          <TouchableOpacity style={styles.secondaryButton} onPress={() => setMode('home')}>
+            <Text style={styles.secondaryButtonText}>Back</Text>
+          </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
     );
@@ -1820,12 +1815,9 @@ export default function App() {
 
           {renderLog()}
 
-          <PartyButton
-            title="Back"
-            onPress={() => setMode('home')}
-            variant="secondary"
-            style={{width: '100%', marginTop: 28}}
-          />
+          <TouchableOpacity style={styles.secondaryButton} onPress={() => setMode('home')}>
+            <Text style={styles.secondaryButtonText}>Back</Text>
+          </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
     );
