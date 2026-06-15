@@ -100486,10 +100486,14 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       _useState54 = (0, _slicedToArray2.default)(_useState53, 2),
       nowPlayingText = _useState54[0],
       setNowPlayingText = _useState54[1];
-    var _useState55 = (0, _react.useState)(0),
+    var _useState55 = (0, _react.useState)('idle'),
       _useState56 = (0, _slicedToArray2.default)(_useState55, 2),
-      nodePlaybackDelayMs = _useState56[0],
-      setNodePlaybackDelayMs = _useState56[1];
+      playbackState = _useState56[0],
+      setPlaybackState = _useState56[1];
+    var _useState57 = (0, _react.useState)(0),
+      _useState58 = (0, _slicedToArray2.default)(_useState57, 2),
+      nodePlaybackDelayMs = _useState58[0],
+      setNodePlaybackDelayMs = _useState58[1];
     var serverRef = (0, _react.useRef)(null);
     var clientsRef = (0, _react.useRef)([]);
     var clientRef = (0, _react.useRef)(null);
@@ -100584,6 +100588,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       currentlyPlayingTrackRef.current = null;
       setPlaybackPositionText('0:00');
       setNowPlayingText('Nothing playing');
+      setPlaybackState('idle');
     };
     var sendTimeSyncToNode = socket => {
       writeSocket(socket, `SYNC_TIME|${Date.now()}`);
@@ -100634,6 +100639,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           setPlaylist(nextPlaylist);
           setSelectedTrackId(track.id);
           setCurrentTrackName(track.name);
+          setPlaybackState('idle');
           setTrackProgress(track.id, 0);
           addLog(`Added track: ${track.name}`);
           autoSyncAndTransfer(track, nextPlaylist, track.id);
@@ -100656,9 +100662,11 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       if (nextPlaylist.length > 0) {
         setSelectedTrackId(nextPlaylist[0].id);
         setCurrentTrackName(nextPlaylist[0].name);
+        setPlaybackState('idle');
       } else {
         setSelectedTrackId(null);
         setCurrentTrackName('None');
+        setPlaybackState('idle');
       }
       addLog(`Removed track: ${selected.name}`);
       setTrackTransferStatus(previous => {
@@ -101032,6 +101040,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         clearInterval(nowPlayingBroadcastTimerRef.current);
         nowPlayingBroadcastTimerRef.current = null;
       }
+      setPlaybackState('paused');
       setStatus('Pause sent to all speakers');
     };
     var selectTrackByOffset = offset => {
@@ -101119,6 +101128,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
         nowPlayingBroadcastTimerRef.current = setInterval(broadcastNowPlaying, 3000);
         startPlaybackUiClock(selected.name, targetTimeMs);
+        setPlaybackState('playing');
         addLog(`Play on all speakers scheduled: ${selected.name}`);
         setStatus(`Playing on all speakers in ${Math.round(START_BUFFER_MS / 1000)}s`);
       });
@@ -101712,6 +101722,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         })]
       });
     };
+    var selectedTrackReadyForPlayback = !!selectedTrackId && (trackTransferStatus[selectedTrackId] >= 100 || isTrackCachedOnAllNodes(selectedTrackId));
     var renderPlaylistPanel = () => /*#__PURE__*/(0, _jsxRuntime.jsx)(_PlaylistPanel.default, {
       styles: styles,
       currentTrackName: currentTrackName,
@@ -101728,7 +101739,18 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       setCurrentTrackName: setCurrentTrackName,
       addLog: addLog,
       autoSyncAndTransfer: autoSyncAndTransfer,
-      onMetadataChange: setCurrentTrackMetadata
+      onMetadataChange: setCurrentTrackMetadata,
+      selectedTrackReady: selectedTrackReadyForPlayback,
+      playbackState: playbackState,
+      onPlayPause: () => {
+        if (playbackState === 'playing') {
+          pauseAllSpeakers();
+        } else {
+          playSelectedTrackOnAllSpeakers();
+        }
+      },
+      selectPreviousTrack: () => selectTrackByOffset(-1),
+      selectNextTrack: () => selectTrackByOffset(1)
     });
     var renderPartyControls = () => /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
       style: styles.panel,
@@ -101851,13 +101873,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         style: styles.screen,
         children: /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.ScrollView, {
           contentContainerStyle: styles.scrollContent,
-          children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-            style: styles.title,
-            children: "\uD83C\uDF9B\uFE0F Party Host"
-          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-            style: styles.text,
-            children: "Control the playlist and speakers."
-          }), renderStatusPanel(), renderPlaylistPanel(), renderPartyControls(), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
+          children: [renderStatusPanel(), renderPlaylistPanel(), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
             style: styles.secondaryButton,
             onPress: stopHostServer,
             children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
@@ -102563,7 +102579,12 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     addTrack,
     removeSelectedTrack,
     autoSyncAndTransfer,
-    onMetadataChange
+    onMetadataChange,
+    selectedTrackReady,
+    playbackState,
+    onPlayPause,
+    selectPreviousTrack,
+    selectNextTrack
   }) {
     var _React$useState = _react.default.useState({
         title: '',
@@ -102618,25 +102639,38 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
           style: localStyles.controlsRow,
           children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-            style: localStyles.controlIcon,
+            style: [localStyles.controlIcon, localStyles.disabledIcon],
             children: "\u21AD"
-          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-            style: localStyles.controlIcon,
-            children: "\u2039\u2039"
           }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
-            style: localStyles.playButton,
-            activeOpacity: 0.8,
+            onPress: selectPreviousTrack,
+            activeOpacity: 0.75,
             children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-              style: localStyles.playButtonText,
-              children: "\u2161"
+              style: localStyles.controlIcon,
+              children: "\u2039\u2039"
+            })
+          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
+            style: [localStyles.playButton, !selectedTrackReady && playbackState !== 'playing' ? localStyles.playButtonDisabled : null],
+            activeOpacity: 0.8,
+            disabled: !selectedTrackReady && playbackState !== 'playing',
+            onPress: onPlayPause,
+            children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+              style: [localStyles.playButtonText, !selectedTrackReady && playbackState !== 'playing' ? localStyles.playButtonTextDisabled : null],
+              children: playbackState === 'playing' ? 'Ⅱ' : '▶'
+            })
+          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
+            onPress: selectNextTrack,
+            activeOpacity: 0.75,
+            children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+              style: localStyles.controlIcon,
+              children: "\u203A\u203A"
             })
           }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-            style: localStyles.controlIcon,
-            children: "\u203A\u203A"
-          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-            style: localStyles.controlIcon,
+            style: [localStyles.controlIcon, localStyles.disabledIcon],
             children: "\u21BB"
           })]
+        }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+          style: localStyles.readyText,
+          children: playbackState === 'playing' ? 'Playing on all speakers' : selectedTrackReady ? 'Ready on all speakers' : selectedTrack ? 'Uploading to speakers...' : 'Add and select a track'
         }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
           style: localStyles.statusText,
           children: nowPlayingText
@@ -102763,10 +102797,26 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       justifyContent: 'center',
       alignItems: 'center'
     },
+    playButtonDisabled: {
+      backgroundColor: 'rgba(255,255,255,0.18)'
+    },
     playButtonText: {
       color: _$$_REQUIRE(_dependencyMap[11], "../ui/PartyTheme").partyTheme.black,
       fontSize: 32,
       fontWeight: '900'
+    },
+    playButtonTextDisabled: {
+      color: 'rgba(255,255,255,0.35)'
+    },
+    disabledIcon: {
+      opacity: 0.35
+    },
+    readyText: {
+      color: _$$_REQUIRE(_dependencyMap[11], "../ui/PartyTheme").partyTheme.white,
+      fontSize: 14,
+      fontWeight: '800',
+      textAlign: 'center',
+      marginBottom: 8
     },
     statusText: {
       color: _$$_REQUIRE(_dependencyMap[11], "../ui/PartyTheme").partyTheme.muted,

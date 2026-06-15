@@ -42,11 +42,7 @@ type Props = {
     selectedIdSnapshot?: string | null,
   ) => void;
   onMetadataChange?: (metadata: TrackMetadata) => void;
-  selectedTrackReady: boolean;
-  playbackState: 'idle' | 'playing' | 'paused';
-  onPlayPause: () => void;
-  selectPreviousTrack: () => void;
-  selectNextTrack: () => void;
+  playbackLevel?: number;
 };
 
 export default function PlaylistPanel({
@@ -65,9 +61,8 @@ export default function PlaylistPanel({
   removeSelectedTrack,
   autoSyncAndTransfer,
   onMetadataChange,
-  selectedTrackReady,
-  playbackState,
-  onPlayPause,
+  playSelectedTrackOnAllSpeakers,
+  pauseAllSpeakers,
   selectPreviousTrack,
   selectNextTrack,
 }: Props) {
@@ -137,49 +132,27 @@ export default function PlaylistPanel({
         </View>
 
         <View style={localStyles.controlsRow}>
-          <Text style={[localStyles.controlIcon, localStyles.disabledIcon]}>↭</Text>
+          <Text style={localStyles.controlIcon}>↭</Text>
 
           <TouchableOpacity onPress={selectPreviousTrack} activeOpacity={0.75}>
             <Text style={localStyles.controlIcon}>‹‹</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[
-              localStyles.playButton,
-              !selectedTrackReady && playbackState !== 'playing'
-                ? localStyles.playButtonDisabled
-                : null,
-            ]}
+            style={localStyles.playButton}
             activeOpacity={0.8}
-            disabled={!selectedTrackReady && playbackState !== 'playing'}
-            onPress={onPlayPause}>
-            <Text
-              style={[
-                localStyles.playButtonText,
-                !selectedTrackReady && playbackState !== 'playing'
-                  ? localStyles.playButtonTextDisabled
-                  : null,
-              ]}>
-              {playbackState === 'playing' ? 'Ⅱ' : '▶'}
-            </Text>
+            onPress={playSelectedTrackOnAllSpeakers}>
+            <Text style={localStyles.playButtonText}>▶</Text>
           </TouchableOpacity>
 
           <TouchableOpacity onPress={selectNextTrack} activeOpacity={0.75}>
             <Text style={localStyles.controlIcon}>››</Text>
           </TouchableOpacity>
 
-          <Text style={[localStyles.controlIcon, localStyles.disabledIcon]}>↻</Text>
+          <TouchableOpacity onPress={pauseAllSpeakers} activeOpacity={0.75}>
+            <Text style={localStyles.controlIcon}>Ⅱ</Text>
+          </TouchableOpacity>
         </View>
-
-        <Text style={localStyles.readyText}>
-          {playbackState === 'playing'
-            ? 'Playing on all speakers'
-            : selectedTrackReady
-              ? 'Ready on all speakers'
-              : selectedTrack
-                ? 'Uploading to speakers...'
-                : 'Add and select a track'}
-        </Text>
 
         <Text style={localStyles.statusText}>{nowPlayingText}</Text>
         <Text style={localStyles.statusText}>{transferProgressText}</Text>
@@ -310,26 +283,10 @@ const localStyles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  playButtonDisabled: {
-    backgroundColor: 'rgba(255,255,255,0.18)',
-  },
   playButtonText: {
     color: partyTheme.black,
     fontSize: 32,
     fontWeight: '900',
-  },
-  playButtonTextDisabled: {
-    color: 'rgba(255,255,255,0.35)',
-  },
-  disabledIcon: {
-    opacity: 0.35,
-  },
-  readyText: {
-    color: partyTheme.white,
-    fontSize: 14,
-    fontWeight: '800',
-    textAlign: 'center',
-    marginBottom: 8,
   },
   statusText: {
     color: partyTheme.muted,

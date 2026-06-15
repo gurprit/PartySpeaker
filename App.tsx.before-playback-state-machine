@@ -90,7 +90,6 @@ export default function App() {
   const [hostClockOffsetMs, setHostClockOffsetMs] = useState(0);
   const [playbackPositionText, setPlaybackPositionText] = useState('0:00');
   const [nowPlayingText, setNowPlayingText] = useState('Nothing playing');
-  const [playbackState, setPlaybackState] = useState<'idle' | 'playing' | 'paused'>('idle');
   const [nodePlaybackDelayMs, setNodePlaybackDelayMs] = useState(0);
 
   const serverRef = useRef<any>(null);
@@ -202,7 +201,6 @@ export default function App() {
     currentlyPlayingTrackRef.current = null;
     setPlaybackPositionText('0:00');
     setNowPlayingText('Nothing playing');
-    setPlaybackState('idle');
   };
 
   const sendTimeSyncToNode = (socket: any) => {
@@ -267,7 +265,6 @@ export default function App() {
       setPlaylist(nextPlaylist);
       setSelectedTrackId(track.id);
       setCurrentTrackName(track.name);
-      setPlaybackState('idle');
       setTrackProgress(track.id, 0);
       addLog(`Added track: ${track.name}`);
       autoSyncAndTransfer(track, nextPlaylist, track.id);
@@ -290,11 +287,9 @@ export default function App() {
     if (nextPlaylist.length > 0) {
       setSelectedTrackId(nextPlaylist[0].id);
       setCurrentTrackName(nextPlaylist[0].name);
-      setPlaybackState('idle');
     } else {
       setSelectedTrackId(null);
       setCurrentTrackName('None');
-      setPlaybackState('idle');
     }
 
     addLog(`Removed track: ${selected.name}`);
@@ -694,7 +689,6 @@ export default function App() {
       nowPlayingBroadcastTimerRef.current = null;
     }
 
-    setPlaybackState('paused');
     setStatus('Pause sent to all speakers');
   };
 
@@ -800,7 +794,6 @@ export default function App() {
     nowPlayingBroadcastTimerRef.current = setInterval(broadcastNowPlaying, 3000);
 
     startPlaybackUiClock(selected.name, targetTimeMs);
-    setPlaybackState('playing');
     addLog(`Play on all speakers scheduled: ${selected.name}`);
     setStatus(`Playing on all speakers in ${Math.round(START_BUFFER_MS / 1000)}s`);
   };
@@ -1495,13 +1488,6 @@ export default function App() {
     );
   };
 
-  const selectedTrackReadyForPlayback =
-    !!selectedTrackId &&
-    (
-      trackTransferStatus[selectedTrackId] >= 100 ||
-      isTrackCachedOnAllNodes(selectedTrackId)
-    );
-
   const renderPlaylistPanel = () => (
     <PlaylistPanel
       styles={styles}
@@ -1520,15 +1506,8 @@ export default function App() {
       addLog={addLog}
       autoSyncAndTransfer={autoSyncAndTransfer}
       onMetadataChange={setCurrentTrackMetadata}
-      selectedTrackReady={selectedTrackReadyForPlayback}
-      playbackState={playbackState}
-      onPlayPause={() => {
-        if (playbackState === 'playing') {
-          pauseAllSpeakers();
-        } else {
-          playSelectedTrackOnAllSpeakers();
-        }
-      }}
+      playSelectedTrackOnAllSpeakers={() => playSelectedTrackOnAllSpeakers()}
+      pauseAllSpeakers={pauseAllSpeakers}
       selectPreviousTrack={() => selectTrackByOffset(-1)}
       selectNextTrack={() => selectTrackByOffset(1)}
     />
@@ -1628,6 +1607,7 @@ export default function App() {
         <ScrollView contentContainerStyle={styles.scrollContent}>
           {renderStatusPanel()}
           {renderPlaylistPanel()}
+          {renderPartyControls()}
 
           <TouchableOpacity style={styles.secondaryButton} onPress={stopHostServer}>
             <Text style={styles.secondaryButtonText}>Stop Host Server</Text>
