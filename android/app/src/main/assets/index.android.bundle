@@ -1288,7 +1288,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
    */
 
   _reactNative.AppRegistry.registerComponent(_$$_REQUIRE(_dependencyMap[3], "./app.json").name, () => _App.default);
-},0,[1,2,610,640],"index.js");
+},0,[1,2,610,639],"index.js");
 __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, exports, _dependencyMap) {
   function _interopRequireDefault(e) {
     return e && e.__esModule ? e : {
@@ -100355,12 +100355,11 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
   var _PartyCard = _interopRequireDefault(_$$_REQUIRE(_dependencyMap[10], "./src/components/ui/PartyCard"));
   var _PartyButton = _interopRequireDefault(_$$_REQUIRE(_dependencyMap[11], "./src/components/ui/PartyButton"));
   var _SectionLabel = _interopRequireDefault(_$$_REQUIRE(_dependencyMap[12], "./src/components/ui/SectionLabel"));
-  var _AudioVisualiser = _interopRequireDefault(_$$_REQUIRE(_dependencyMap[13], "./src/components/visualiser/AudioVisualiser"));
-  var _react = _interopRequireWildcard(_$$_REQUIRE(_dependencyMap[14], "react"));
-  var _reactNative = _$$_REQUIRE(_dependencyMap[15], "react-native");
-  var _reactNativeTcpSocket = _interopRequireDefault(_$$_REQUIRE(_dependencyMap[16], "react-native-tcp-socket"));
-  var _reactNativeUdp = _interopRequireDefault(_$$_REQUIRE(_dependencyMap[17], "react-native-udp"));
-  var _jsxRuntime = _$$_REQUIRE(_dependencyMap[18], "react/jsx-runtime");
+  var _react = _interopRequireWildcard(_$$_REQUIRE(_dependencyMap[13], "react"));
+  var _reactNative = _$$_REQUIRE(_dependencyMap[14], "react-native");
+  var _reactNativeTcpSocket = _interopRequireDefault(_$$_REQUIRE(_dependencyMap[15], "react-native-tcp-socket"));
+  var _reactNativeUdp = _interopRequireDefault(_$$_REQUIRE(_dependencyMap[16], "react-native-udp"));
+  var _jsxRuntime = _$$_REQUIRE(_dependencyMap[17], "react/jsx-runtime");
   var _jsxFileName = "/Volumes/SHINY/Projects/PartySpeaker/App.tsx";
   function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function (e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, default: e }; if (null === e || "object" != typeof e && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t in e) "default" !== _t && {}.hasOwnProperty.call(e, _t) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t)) && (i.get || i.set) ? o(f, _t, i) : f[_t] = e[_t]); return f; })(e, t); }
   var PartyAudio = _reactNative.NativeModules.PartyAudio;
@@ -101666,7 +101665,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           children: "Party Code"
         }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
           style: {
-            color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.white,
+            color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.white,
             fontSize: 112,
             lineHeight: 116,
             fontWeight: '900',
@@ -101683,13 +101682,13 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           },
           children: [/*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.Text, {
             style: {
-              color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.muted,
+              color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
               fontSize: 16
             },
             children: ["\uD83D\uDCE1 ", hostLocalIp, ":5050"]
           }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.Text, {
             style: {
-              color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.muted,
+              color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
               fontSize: 16
             },
             children: ["\uD83D\uDC64 ", nodeCount, " ", nodeCount === 1 ? 'speaker' : 'speakers']
@@ -101704,7 +101703,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           },
           children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
             style: {
-              color: isHosting ? _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.white : _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.muted,
+              color: isHosting ? _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.white : _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
               fontSize: 15,
               fontWeight: '700',
               textAlign: 'center'
@@ -101712,7 +101711,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
             children: isHosting ? `Ready for speakers to join${nodeCount > 0 ? ` • ${nodeCount} connected` : ''}` : 'Tap Start Hosting to open the party'
           }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
             style: {
-              color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.faint,
+              color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.faint,
               fontSize: 12,
               marginTop: 6,
               textAlign: 'center'
@@ -101894,125 +101893,242 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       });
     }
     if (mode === 'node') {
+      var isConnected = !!clientRef.current && !status.toLowerCase().includes('closed') && !status.toLowerCase().includes('error');
       return /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.SafeAreaView, {
         style: styles.screen,
         children: /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.ScrollView, {
           contentContainerStyle: styles.scrollContent,
-          children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-            style: styles.title,
-            children: "\uD83D\uDD0A Speaker Node"
-          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-            style: styles.text,
-            children: "This phone connects to the host."
-          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-            style: styles.label,
-            children: "Enter Party Code"
-          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TextInput, {
-            style: styles.input,
-            placeholder: "e.g. 225",
-            placeholderTextColor: "#6d8f7b",
-            value: partyCode,
-            onChangeText: setPartyCode,
-            autoCapitalize: "none",
-            keyboardType: "number-pad"
-          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-            style: styles.hint,
-            children: "Use the number shown on the host screen."
-          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
-            style: styles.button,
-            onPress: connectWithPartyCode,
-            children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-              style: styles.buttonText,
-              children: "Join With Party Code"
-            })
-          }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
-            style: styles.panel,
-            children: [renderPanelHeader('Now Playing'), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
+          children: [/*#__PURE__*/(0, _jsxRuntime.jsxs)(_PartyCard.default, {
+            style: {
+              width: '100%',
+              gap: 16
+            },
+            children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_SectionLabel.default, {
+              children: "Join a Party"
+            }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TextInput, {
+              style: [styles.input, {
+                width: '100%',
+                minHeight: 76,
+                fontSize: 30,
+                textAlign: 'center',
+                backgroundColor: 'rgba(255,255,255,0.055)',
+                borderColor: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.border,
+                color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.white
+              }],
+              placeholder: "Enter party code",
+              placeholderTextColor: "#777",
+              value: partyCode,
+              onChangeText: setPartyCode,
+              autoCapitalize: "none",
+              keyboardType: "number-pad"
+            }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_PartyButton.default, {
+              title: isConnected ? '✅ Connected' : '↪ Join Party',
+              onPress: connectWithPartyCode
+            }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
               style: {
-                marginTop: 18,
-                marginBottom: 24,
-                borderRadius: 30,
-                padding: 22,
-                backgroundColor: 'rgba(255,255,255,0.04)',
-                borderWidth: 1,
-                borderColor: 'rgba(255,255,255,0.08)',
-                shadowColor: '#39ff14',
-                shadowOpacity: 0.15,
-                shadowRadius: 20,
-                elevation: 8
+                color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
+                textAlign: 'center'
               },
-              children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_NowPlayingArtwork.default, {
-                title: currentTrackMetadata.title || currentTrackName,
-                artworkUri: currentTrackMetadata.artworkUri
-              }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_TrackInfo.default, {
-                metadata: {
-                  title: currentTrackMetadata.title || currentTrackName || 'Waiting for track',
-                  artist: currentTrackMetadata.artist || 'Waiting for metadata',
-                  album: currentTrackMetadata.album || 'Speaker Node',
-                  artworkUri: currentTrackMetadata.artworkUri,
-                  durationMs: currentTrackMetadata.durationMs
-                }
-              }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.Text, {
-                style: styles.status,
-                children: ["Playback: ", nowPlayingText]
-              }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.Text, {
-                style: styles.status,
-                children: ["Position: ", playbackPositionText]
-              }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_AudioVisualiser.default, {
-                isActive: currentTrackName.trim().length > 0 && currentTrackName !== 'No track selected',
-                label: currentTrackName.trim().length > 0 && currentTrackName !== 'No track selected' ? 'Visualiser synced to playback clock' : 'Waiting for host playback',
-                playbackPositionText: playbackPositionText
-              })]
+              children: isConnected ? 'You are connected to the party' : 'Use the code shown on the host screen'
+            })]
+          }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_PartyCard.default, {
+            style: {
+              width: '100%',
+              marginTop: 18
+            },
+            children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_SectionLabel.default, {
+              children: "Speaker Status"
+            }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+              style: {
+                color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.white,
+                fontSize: 34,
+                fontWeight: '900'
+              },
+              children: isConnected ? 'Connected' : 'Not Connected'
+            }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+              style: {
+                color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
+                marginTop: 6
+              },
+              children: status
             })]
           }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
-            style: styles.panel,
-            children: [renderPanelHeader('Synced Playlist Preview'), playlist.length === 0 ? /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-              style: styles.logText,
-              children: "No playlist received yet"
-            }) : playlist.map((track, index) => {
-              var selected = selectedTrackId === track.id;
-              return /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
-                style: selected ? styles.trackSelected : styles.trackRow,
-                onPress: () => {
-                  setSelectedTrackId(track.id);
-                  setCurrentTrackName(track.name);
+            style: {
+              width: '100%',
+              marginTop: 24
+            },
+            children: [/*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
+              style: {
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              },
+              children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_SectionLabel.default, {
+                children: "Playlist"
+              }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.Text, {
+                style: {
+                  color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
+                  fontWeight: '800'
                 },
-                children: /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.Text, {
-                  style: selected ? styles.trackTextSelected : styles.trackText,
-                  children: [index + 1, ". ", track.name]
-                })
-              }, track.id);
+                children: [playlist.length, " ", playlist.length === 1 ? 'Track' : 'Tracks']
+              })]
+            }), playlist.length === 0 ? /*#__PURE__*/(0, _jsxRuntime.jsx)(_PartyCard.default, {
+              children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+                style: {
+                  color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
+                  textAlign: 'center'
+                },
+                children: "No playlist received yet"
+              })
+            }) : /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.View, {
+              style: {
+                gap: 10
+              },
+              children: playlist.map((track, index) => {
+                var selected = selectedTrackId === track.id;
+                return /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.TouchableOpacity, {
+                  activeOpacity: 0.82,
+                  style: {
+                    minHeight: 86,
+                    borderRadius: 22,
+                    paddingHorizontal: 18,
+                    paddingVertical: 14,
+                    backgroundColor: selected ? _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.white : _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.card,
+                    borderColor: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.border,
+                    borderWidth: 1,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 14
+                  },
+                  onPress: () => {
+                    setSelectedTrackId(track.id);
+                    setCurrentTrackName(track.name);
+                  },
+                  children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+                    style: {
+                      color: selected ? _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.black : _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.white,
+                      fontSize: 24,
+                      fontWeight: '900',
+                      width: 28
+                    },
+                    children: index + 1
+                  }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.View, {
+                    style: {
+                      width: 56,
+                      height: 56,
+                      borderRadius: 16,
+                      backgroundColor: selected ? 'rgba(0,0,0,0.12)' : _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.cardStrong,
+                      justifyContent: 'center',
+                      alignItems: 'center'
+                    },
+                    children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+                      style: {
+                        color: selected ? _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.black : _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.white,
+                        fontSize: 24,
+                        fontWeight: '900'
+                      },
+                      children: track.name.trim()[0]?.toUpperCase() || '♪'
+                    })
+                  }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
+                    style: {
+                      flex: 1
+                    },
+                    children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+                      numberOfLines: 1,
+                      style: {
+                        color: selected ? _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.black : _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.white,
+                        fontSize: 18,
+                        fontWeight: '900'
+                      },
+                      children: track.name.replace(/\.[^.]+$/, '')
+                    }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+                      numberOfLines: 1,
+                      style: {
+                        color: selected ? 'rgba(0,0,0,0.55)' : _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
+                        fontSize: 14,
+                        marginTop: 3
+                      },
+                      children: "Synced from host"
+                    })]
+                  }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+                    style: {
+                      color: selected ? _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.black : _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
+                      fontSize: 28
+                    },
+                    children: "\u22EE"
+                  })]
+                }, track.id);
+              })
             })]
-          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_NodeStatusPanel.default, {
-            styles: styles,
-            status: status,
-            nowPlayingText: nowPlayingText,
-            playbackPositionText: playbackPositionText,
-            hostClockOffsetMs: hostClockOffsetMs,
-            nodePlaybackDelayMs: nodePlaybackDelayMs,
-            subnetPrefix: subnetPrefix,
-            lastMessage: lastMessage
-          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
-            style: styles.secondaryButton,
+          }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_PartyCard.default, {
+            style: {
+              width: '100%',
+              marginTop: 24
+            },
+            children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_SectionLabel.default, {
+              children: "Now Playing"
+            }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_NowPlayingArtwork.default, {
+              title: currentTrackMetadata.title || currentTrackName,
+              artworkUri: currentTrackMetadata.artworkUri
+            }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_TrackInfo.default, {
+              metadata: {
+                title: currentTrackMetadata.title || currentTrackName || 'Waiting for track',
+                artist: currentTrackMetadata.artist || 'Waiting for metadata',
+                album: currentTrackMetadata.album || 'Speaker Node',
+                artworkUri: currentTrackMetadata.artworkUri,
+                durationMs: currentTrackMetadata.durationMs
+              }
+            }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+              style: {
+                color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
+                textAlign: 'center',
+                marginTop: 8
+              },
+              children: nowPlayingText
+            }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+              style: {
+                color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.faint,
+                textAlign: 'center',
+                marginTop: 4
+              },
+              children: playbackPositionText
+            })]
+          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_PartyButton.default, {
+            title: showNodeDebugTools ? 'Hide Developer Tools ▲' : 'Developer Tools ▼',
             onPress: () => setShowNodeDebugTools(previous => !previous),
-            children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-              style: styles.secondaryButtonText,
-              children: showNodeDebugTools ? 'Hide Developer Tools ▲' : 'Developer Tools ▼'
-            })
-          }), showNodeDebugTools ? /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
-            style: styles.panel,
-            children: [renderPanelHeader('Developer Tools'), /*#__PURE__*/(0, _jsxRuntime.jsx)(_NodeDelayCalibration.default, {
+            variant: "secondary",
+            style: {
+              width: '100%',
+              marginTop: 22
+            }
+          }), showNodeDebugTools ? /*#__PURE__*/(0, _jsxRuntime.jsxs)(_PartyCard.default, {
+            style: {
+              width: '100%',
+              marginTop: 14
+            },
+            children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_SectionLabel.default, {
+              children: "Developer Tools"
+            }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_NodeStatusPanel.default, {
+              styles: styles,
+              status: status,
+              nowPlayingText: nowPlayingText,
+              playbackPositionText: playbackPositionText,
+              hostClockOffsetMs: hostClockOffsetMs,
+              nodePlaybackDelayMs: nodePlaybackDelayMs,
+              subnetPrefix: subnetPrefix,
+              lastMessage: lastMessage
+            }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_NodeDelayCalibration.default, {
               styles: styles,
               nodePlaybackDelayMs: nodePlaybackDelayMs,
               adjustNodeDelay: adjustNodeDelay,
               resetNodeDelay: resetNodeDelay
             }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
               style: styles.label,
-              children: "Developer Manual Host IP"
+              children: "Manual Host IP"
             }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TextInput, {
               style: styles.input,
               placeholder: "Host IP address",
-              placeholderTextColor: "#6d8f7b",
+              placeholderTextColor: "#666",
               value: hostIp,
               onChangeText: setHostIp,
               autoCapitalize: "none",
@@ -102032,28 +102148,35 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                 children: isScanning ? 'Scanning...' : 'Fallback Scan'
               })
             }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
-              style: styles.button,
+              style: styles.secondaryButton,
               onPress: sendAliveToHost,
               children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-                style: styles.buttonText,
+                style: styles.secondaryButtonText,
                 children: "Send I'm Alive"
               })
-            })]
-          }) : null, /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
-            style: styles.secondaryButton,
-            onPress: disconnectFromHost,
-            children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-              style: styles.secondaryButtonText,
-              children: "Disconnect"
-            })
-          }), renderLog(), /*#__PURE__*/(0, _jsxRuntime.jsx)(_PartyButton.default, {
-            title: "Back",
-            onPress: () => setMode('home'),
-            variant: "secondary",
+            }), renderLog()]
+          }) : null, /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
             style: {
               width: '100%',
-              marginTop: 28
-            }
+              flexDirection: 'row',
+              gap: 12,
+              marginTop: 22
+            },
+            children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_PartyButton.default, {
+              title: "Disconnect",
+              onPress: disconnectFromHost,
+              variant: "secondary",
+              style: {
+                flex: 1
+              }
+            }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_PartyButton.default, {
+              title: "Back",
+              onPress: () => setMode('home'),
+              variant: "secondary",
+              style: {
+                flex: 1
+              }
+            })]
           })]
         })
       });
@@ -102067,7 +102190,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }],
         children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
           style: {
-            color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.white,
+            color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.white,
             fontSize: 54,
             lineHeight: 58,
             fontWeight: '900',
@@ -102078,7 +102201,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           children: "PartySpeaker"
         }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
           style: {
-            color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.muted,
+            color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
             fontSize: 18,
             lineHeight: 26,
             textAlign: 'center',
@@ -102099,7 +102222,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           })]
         }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
           style: {
-            color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.faint,
+            color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.faint,
             fontSize: 13,
             lineHeight: 19,
             textAlign: 'center',
@@ -102379,7 +102502,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       fontWeight: '700'
     }
   });
-},610,[1,178,14,611,612,613,614,625,619,620,623,621,624,626,71,2,627,636,182,622],"App.tsx");
+},610,[1,178,14,611,612,613,614,625,619,620,623,621,624,71,2,626,635,182,622],"App.tsx");
 __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, exports, _dependencyMap) {
   var _interopRequireDefault = _$$_REQUIRE(_dependencyMap[0], "@babel/runtime/helpers/interopRequireDefault");
   Object.defineProperty(exports, "__esModule", {
@@ -102614,74 +102737,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     var selectedTransfer = selectedTrack ? trackTransferStatus[selectedTrack.id] || 0 : 0;
     return /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
       style: localStyles.container,
-      children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_SectionLabel.default, {
-        children: "Now Playing"
-      }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_PartyCard.default, {
-        style: localStyles.nowPlayingCard,
-        children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_NowPlayingArtwork.default, {
-          title: metadata.title || currentTrackName,
-          artworkUri: metadata.artworkUri
-        }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_TrackInfo.default, {
-          metadata: metadata
-        }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
-          style: localStyles.progressRow,
-          children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-            style: localStyles.timeText,
-            children: playbackPositionText
-          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.View, {
-            style: localStyles.progressOuter,
-            children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.View, {
-              style: [localStyles.progressInner, {
-                width: `${Math.max(4, Math.min(100, transferProgress || selectedTransfer))}%`
-              }]
-            })
-          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-            style: localStyles.timeText,
-            children: "--:--"
-          })]
-        }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
-          style: localStyles.controlsRow,
-          children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-            style: [localStyles.controlIcon, localStyles.disabledIcon],
-            children: "\u21AD"
-          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
-            onPress: selectPreviousTrack,
-            activeOpacity: 0.75,
-            children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-              style: localStyles.controlIcon,
-              children: "\u2039\u2039"
-            })
-          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
-            style: [localStyles.playButton, !selectedTrackReady && playbackState !== 'playing' ? localStyles.playButtonDisabled : null],
-            activeOpacity: 0.8,
-            disabled: !selectedTrackReady && playbackState !== 'playing',
-            onPress: onPlayPause,
-            children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-              style: [localStyles.playButtonText, !selectedTrackReady && playbackState !== 'playing' ? localStyles.playButtonTextDisabled : null],
-              children: playbackState === 'playing' ? 'Ⅱ' : '▶'
-            })
-          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
-            onPress: selectNextTrack,
-            activeOpacity: 0.75,
-            children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-              style: localStyles.controlIcon,
-              children: "\u203A\u203A"
-            })
-          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-            style: [localStyles.controlIcon, localStyles.disabledIcon],
-            children: "\u21BB"
-          })]
-        }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-          style: localStyles.readyText,
-          children: playbackState === 'playing' ? 'Playing on all speakers' : selectedTrackReady ? 'Ready on all speakers' : selectedTrack ? 'Uploading to speakers...' : 'Add and select a track'
-        }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-          style: localStyles.statusText,
-          children: nowPlayingText
-        }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-          style: localStyles.statusText,
-          children: transferProgressText
-        })]
-      }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
+      children: [/*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
         style: localStyles.sectionHeaderRow,
         children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_SectionLabel.default, {
           children: "Playlist"
@@ -102709,27 +102765,27 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
               autoSyncAndTransfer(track, playlist, track.id);
             },
             children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-              style: localStyles.trackIndex,
+              style: [localStyles.trackIndex, selected ? localStyles.trackIndexSelected : null],
               children: index + 1
             }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.View, {
               style: localStyles.trackArtworkMini,
               children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-                style: localStyles.trackArtworkText,
+                style: [localStyles.trackArtworkText, selected ? localStyles.trackArtworkTextSelected : null],
                 children: track.name.trim()[0]?.toUpperCase() || '♪'
               })
             }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
               style: localStyles.trackTextWrap,
               children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-                style: localStyles.trackTitle,
+                style: [localStyles.trackTitle, selected ? localStyles.trackTitleSelected : null],
                 numberOfLines: 1,
                 children: track.name.replace(/\.[^.]+$/, '')
               }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-                style: localStyles.trackMeta,
+                style: [localStyles.trackMeta, selected ? localStyles.trackMetaSelected : null],
                 numberOfLines: 1,
                 children: progress >= 100 ? 'Cached on speakers' : `Loading ${progress}%`
               })]
             }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-              style: localStyles.moreIcon,
+              style: [localStyles.moreIcon, selected ? localStyles.moreIconSelected : null],
               children: "\u22EE"
             })]
           }, track.id);
@@ -102737,7 +102793,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
         style: localStyles.actionsRow,
         children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_PartyButton.default, {
-          title: "\uFF0B Add Track",
+          title: "\uFF0B Add",
           onPress: addTrack,
           variant: "secondary",
           style: localStyles.actionButton
@@ -102747,12 +102803,85 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           variant: "secondary",
           style: localStyles.actionButton
         })]
+      }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
+        style: localStyles.nowPlayingSpacing,
+        children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_SectionLabel.default, {
+          children: "Now Playing"
+        }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_PartyCard.default, {
+          style: localStyles.nowPlayingCard,
+          children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_NowPlayingArtwork.default, {
+            title: metadata.title || currentTrackName,
+            artworkUri: metadata.artworkUri
+          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_TrackInfo.default, {
+            metadata: metadata
+          }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
+            style: localStyles.progressRow,
+            children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+              style: localStyles.timeText,
+              children: playbackPositionText
+            }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.View, {
+              style: localStyles.progressOuter,
+              children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.View, {
+                style: [localStyles.progressInner, {
+                  width: `${Math.max(4, Math.min(100, transferProgress || selectedTransfer))}%`
+                }]
+              })
+            }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+              style: localStyles.timeText,
+              children: "--:--"
+            })]
+          }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
+            style: localStyles.controlsRow,
+            children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+              style: [localStyles.controlIcon, localStyles.disabledIcon],
+              children: "\u21AD"
+            }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
+              onPress: selectPreviousTrack,
+              activeOpacity: 0.75,
+              children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+                style: localStyles.controlIcon,
+                children: "\u2039\u2039"
+              })
+            }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
+              style: [localStyles.playButton, !selectedTrackReady && playbackState !== 'playing' ? localStyles.playButtonDisabled : null],
+              activeOpacity: 0.8,
+              disabled: !selectedTrackReady && playbackState !== 'playing',
+              onPress: onPlayPause,
+              children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+                style: [localStyles.playButtonText, !selectedTrackReady && playbackState !== 'playing' ? localStyles.playButtonTextDisabled : null],
+                children: playbackState === 'playing' ? 'Ⅱ' : '▶'
+              })
+            }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
+              onPress: selectNextTrack,
+              activeOpacity: 0.75,
+              children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+                style: localStyles.controlIcon,
+                children: "\u203A\u203A"
+              })
+            }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+              style: [localStyles.controlIcon, localStyles.disabledIcon],
+              children: "\u21BB"
+            })]
+          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+            style: localStyles.readyText,
+            children: playbackState === 'playing' ? 'Playing on all speakers' : selectedTrackReady ? 'Ready on all speakers' : selectedTrack ? 'Uploading to speakers...' : 'Add and select a track'
+          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+            style: localStyles.statusText,
+            children: nowPlayingText
+          }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+            style: localStyles.statusText,
+            children: transferProgressText
+          })]
+        })]
       })]
     });
   }
   var localStyles = _reactNative.StyleSheet.create({
     container: {
       gap: 16
+    },
+    nowPlayingSpacing: {
+      marginTop: 24
     },
     nowPlayingCard: {
       padding: 18
@@ -102867,6 +102996,9 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       fontWeight: '900',
       width: 28
     },
+    trackIndexSelected: {
+      color: _$$_REQUIRE(_dependencyMap[11], "../ui/PartyTheme").partyTheme.black
+    },
     trackArtworkMini: {
       width: 54,
       height: 54,
@@ -102880,6 +103012,9 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       fontSize: 22,
       fontWeight: '900'
     },
+    trackArtworkTextSelected: {
+      color: _$$_REQUIRE(_dependencyMap[11], "../ui/PartyTheme").partyTheme.black
+    },
     trackTextWrap: {
       flex: 1
     },
@@ -102888,15 +103023,24 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       fontSize: 17,
       fontWeight: '900'
     },
+    trackTitleSelected: {
+      color: _$$_REQUIRE(_dependencyMap[11], "../ui/PartyTheme").partyTheme.black
+    },
     trackMeta: {
       color: _$$_REQUIRE(_dependencyMap[11], "../ui/PartyTheme").partyTheme.muted,
       fontSize: 14,
       marginTop: 3
     },
+    trackMetaSelected: {
+      color: 'rgba(0,0,0,0.55)'
+    },
     moreIcon: {
       color: _$$_REQUIRE(_dependencyMap[11], "../ui/PartyTheme").partyTheme.muted,
       fontSize: 28,
       fontWeight: '900'
+    },
+    moreIconSelected: {
+      color: 'rgba(0,0,0,0.55)'
     },
     actionsRow: {
       flexDirection: 'row',
@@ -103316,114 +103460,6 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
   }
 },625,[1,71,2,182],"src/components/host/EventLog.tsx");
 __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, exports, _dependencyMap) {
-  var _interopRequireDefault = _$$_REQUIRE(_dependencyMap[0], "@babel/runtime/helpers/interopRequireDefault");
-  Object.defineProperty(exports, "__esModule", {
-    value: true
-  });
-  exports.default = AudioVisualiser;
-  var _slicedToArray2 = _interopRequireDefault(_$$_REQUIRE(_dependencyMap[1], "@babel/runtime/helpers/slicedToArray"));
-  var _react = _interopRequireWildcard(_$$_REQUIRE(_dependencyMap[2], "react"));
-  var _reactNative = _$$_REQUIRE(_dependencyMap[3], "react-native");
-  var _jsxRuntime = _$$_REQUIRE(_dependencyMap[4], "react/jsx-runtime");
-  var _jsxFileName = "/Volumes/SHINY/Projects/PartySpeaker/src/components/visualiser/AudioVisualiser.tsx";
-  function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function (e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, default: e }; if (null === e || "object" != typeof e && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t in e) "default" !== _t && {}.hasOwnProperty.call(e, _t) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t)) && (i.get || i.set) ? o(f, _t, i) : f[_t] = e[_t]); return f; })(e, t); }
-  var BAR_COUNT = 28;
-  var PATTERN = [0.18, 0.28, 0.44, 0.66, 0.82, 0.95, 0.74, 0.52, 0.34, 0.24, 0.38, 0.62, 0.88, 1, 0.78, 0.58, 0.42, 0.31, 0.49, 0.71, 0.91, 0.84, 0.63, 0.46, 0.29, 0.21, 0.33, 0.56];
-  function parsePlaybackSeconds(value) {
-    if (!value) {
-      return 0;
-    }
-    var parts = value.split(':').map(part => Number(part.trim()));
-    if (parts.some(Number.isNaN)) {
-      return 0;
-    }
-    if (parts.length === 2) {
-      return parts[0] * 60 + parts[1];
-    }
-    if (parts.length === 3) {
-      return parts[0] * 3600 + parts[1] * 60 + parts[2];
-    }
-    return 0;
-  }
-  function AudioVisualiser({
-    isActive,
-    label,
-    playbackPositionText
-  }) {
-    var _useState = (0, _react.useState)(0),
-      _useState2 = (0, _slicedToArray2.default)(_useState, 2),
-      frame = _useState2[0],
-      setFrame = _useState2[1];
-    var playbackSeconds = (0, _react.useMemo)(() => parsePlaybackSeconds(playbackPositionText), [playbackPositionText]);
-    (0, _react.useEffect)(() => {
-      if (!isActive) {
-        setFrame(0);
-        return;
-      }
-      var timer = setInterval(() => {
-        setFrame(previous => previous + 1);
-      }, 90);
-      return () => clearInterval(timer);
-    }, [isActive]);
-    return /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
-      style: styles.wrapper,
-      children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
-        style: styles.statusLabel,
-        children: label || (isActive ? 'Visualiser active' : 'Visualiser waiting')
-      }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.View, {
-        style: styles.visualiser,
-        children: PATTERN.map((base, index) => {
-          var phase = playbackSeconds * 0.85 + frame * 0.18 + index * 0.55;
-          var wave = (Math.sin(phase) + 1) / 2;
-          var beat = (Math.sin(playbackSeconds * 2.4 + frame * 0.3) + 1) / 2;
-          var energy = isActive ? Math.min(1, base * 0.35 + wave * 0.3 + beat * 0.35) : 0.18;
-          var height = 10 + energy * 82;
-          return /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.View, {
-            style: [styles.bar, {
-              height,
-              opacity: isActive ? 0.95 : 0.35
-            }]
-          }, index);
-        })
-      })]
-    });
-  }
-  var styles = _reactNative.StyleSheet.create({
-    wrapper: {
-      marginVertical: 18,
-      paddingVertical: 12,
-      borderRadius: 24,
-      backgroundColor: 'rgba(57, 255, 20, 0.06)',
-      borderWidth: 1,
-      borderColor: 'rgba(57, 255, 20, 0.18)'
-    },
-    statusLabel: {
-      color: '#8fcf9e',
-      textAlign: 'center',
-      fontSize: 12,
-      marginBottom: 8,
-      letterSpacing: 0.6,
-      textTransform: 'uppercase'
-    },
-    visualiser: {
-      height: 100,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 4
-    },
-    bar: {
-      width: 5,
-      borderRadius: 999,
-      backgroundColor: '#39ff14',
-      shadowColor: '#39ff14',
-      shadowOpacity: 0.8,
-      shadowRadius: 8,
-      elevation: 4
-    }
-  });
-},626,[1,14,71,2,182],"src/components/visualiser/AudioVisualiser.tsx");
-__d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, exports, _dependencyMap) {
   'use strict';
 
   var _interopRequireDefault = _$$_REQUIRE(_dependencyMap[0], "@babel/runtime/helpers/interopRequireDefault");
@@ -103558,7 +103594,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     TLSSocket: _TLSSocket.default,
     hasIdentity: _TLSSocket.default.hasIdentity
   };
-},627,[1,628,630,634,635],"node_modules/react-native-tcp-socket/src/index.js");
+},626,[1,627,629,633,634],"node_modules/react-native-tcp-socket/src/index.js");
 __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, exports, _dependencyMap) {
   'use strict';
 
@@ -103876,7 +103912,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       }
     }]);
   }(_eventemitter.default);
-},628,[1,22,23,52,54,57,629,2,630,633],"node_modules/react-native-tcp-socket/src/Server.js");
+},627,[1,22,23,52,54,57,628,2,629,632],"node_modules/react-native-tcp-socket/src/Server.js");
 __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, exports, _dependencyMap) {
   'use strict';
 
@@ -104189,7 +104225,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
   if ('undefined' !== typeof module) {
     module.exports = EventEmitter;
   }
-},629,[],"node_modules/eventemitter3/index.js");
+},628,[],"node_modules/eventemitter3/index.js");
 __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, exports, _dependencyMap) {
   'use strict';
 
@@ -104781,7 +104817,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       }
     }]);
   }(_eventemitter.default);
-},630,[1,178,22,23,52,54,57,2,629,631,633],"node_modules/react-native-tcp-socket/src/Socket.js");
+},629,[1,178,22,23,52,54,57,2,628,630,632],"node_modules/react-native-tcp-socket/src/Socket.js");
 __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, exports, _dependencyMap) {
   /*!
    * The buffer module from node.js, for the browser.
@@ -106288,7 +106324,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     }
     return table;
   }();
-},631,[243,632],"node_modules/buffer/index.js");
+},630,[243,631],"node_modules/buffer/index.js");
 __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, exports, _dependencyMap) {
   /*! ieee754. BSD-3-Clause License. Feross Aboukhadijeh <https://feross.org/opensource> */
   exports.read = function (buffer, offset, isLE, mLen, nBytes) {
@@ -106364,7 +106400,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     for (; eLen > 0; buffer[offset + i] = e & 0xff, i += d, e /= 256, eLen -= 8) {}
     buffer[offset + i - d] |= s * 128;
   };
-},632,[],"node_modules/ieee754/index.js");
+},631,[],"node_modules/ieee754/index.js");
 __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, exports, _dependencyMap) {
   Object.defineProperty(exports, "__esModule", {
     value: true
@@ -106378,7 +106414,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     return instanceNumber++;
   }
   var nativeEventEmitter = exports.nativeEventEmitter = new _reactNative.NativeEventEmitter(Sockets);
-},633,[2],"node_modules/react-native-tcp-socket/src/Globals.js");
+},632,[2],"node_modules/react-native-tcp-socket/src/Globals.js");
 __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, exports, _dependencyMap) {
   'use strict';
 
@@ -106475,7 +106511,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       }
     }]);
   }(_Server2.default);
-},634,[1,22,23,52,54,55,57,2,628,635],"node_modules/react-native-tcp-socket/src/TLSServer.js");
+},633,[1,22,23,52,54,55,57,2,627,634],"node_modules/react-native-tcp-socket/src/TLSServer.js");
 __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, exports, _dependencyMap) {
   'use strict';
 
@@ -106613,7 +106649,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       }
     }]);
   }(_Socket2.default);
-},635,[1,22,23,52,54,57,2,630],"node_modules/react-native-tcp-socket/src/TLSSocket.js");
+},634,[1,22,23,52,54,57,2,629],"node_modules/react-native-tcp-socket/src/TLSSocket.js");
 __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, exports, _dependencyMap) {
   var _interopRequireDefault = _$$_REQUIRE(_dependencyMap[0], "@babel/runtime/helpers/interopRequireDefault");
   Object.defineProperty(exports, "__esModule", {
@@ -106657,7 +106693,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
   UdpSockets.Socket = _UdpSocket.default;
   var _default = exports.default = UdpSockets; // @ts-ignore
   module.exports = UdpSockets;
-},636,[1,22,23,637],"node_modules/react-native-udp/src/index.js");
+},635,[1,22,23,636],"node_modules/react-native-udp/src/index.js");
 __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, exports, _dependencyMap) {
   var _interopRequireDefault = _$$_REQUIRE(_dependencyMap[0], "@babel/runtime/helpers/interopRequireDefault");
   Object.defineProperty(exports, "__esModule", {
@@ -107212,7 +107248,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       return err;
     }
   }
-},637,[1,22,23,52,54,57,2,638,639,631],"node_modules/react-native-udp/src/UdpSocket.js");
+},636,[1,22,23,52,54,57,2,637,638,630],"node_modules/react-native-udp/src/UdpSocket.js");
 __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, exports, _dependencyMap) {
   Object.defineProperty(exports, "__esModule", {
     value: true
@@ -107231,7 +107267,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     if (typeof lastArg === 'function') options.callback = lastArg;
     return options;
   }
-},638,[],"node_modules/react-native-udp/src/normalizeBindOptions.js");
+},637,[],"node_modules/react-native-udp/src/normalizeBindOptions.js");
 __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, exports, _dependencyMap) {
   // Copyright Joyent, Inc. and other Node contributors.
   //
@@ -107633,13 +107669,13 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       throw new TypeError('The "emitter" argument must be of type EventEmitter. Received type ' + typeof emitter);
     }
   }
-},639,[],"node_modules/events/events.js");
+},638,[],"node_modules/events/events.js");
 __d(function(global, require, _importDefaultUnused, _importAllUnused, module, exports, _dependencyMapUnused) {
   module.exports = {
   "name": "PartySpeaker",
   "displayName": "PartySpeaker"
 }
 ;
-},640,[],"app.json");
+},639,[],"app.json");
 __r(109);
 __r(0);
