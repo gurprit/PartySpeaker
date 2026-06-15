@@ -5,6 +5,10 @@ import PlaylistPanel from './src/components/host/PlaylistPanel';
 import EventLog from './src/components/host/EventLog';
 import NowPlayingArtwork from './src/components/visualiser/NowPlayingArtwork';
 import TrackInfo from './src/components/visualiser/TrackInfo';
+import PartyCard from './src/components/ui/PartyCard';
+import PartyButton from './src/components/ui/PartyButton';
+import SectionLabel from './src/components/ui/SectionLabel';
+import {partyTheme} from './src/components/ui/PartyTheme';
 import AudioVisualiser from './src/components/visualiser/AudioVisualiser';
 import {TrackMetadata} from './src/types/TrackMetadata';
 import React, {useEffect, useRef, useState} from 'react';
@@ -96,6 +100,7 @@ export default function App() {
   const countdownTimerRef = useRef<any>(null);
   const playbackUiTimerRef = useRef<any>(null);
   const nowPlayingBroadcastTimerRef = useRef<any>(null);
+  const nodeHeartbeatTimerRef = useRef<any>(null);
   const nowPlayingRef = useRef<{trackId: string; trackName: string; startedAtHostMs: number} | null>(null);
   const currentlyPlayingTrackRef = useRef<string | null>(null);
   const transferBuffersRef = useRef<Record<string, {name: string; chunks: string[]}>>({});
@@ -448,6 +453,10 @@ export default function App() {
           if (!isTransferChunk) {
             setLastMessage(message);
             addLog(`Node says: ${message}`);
+          }
+
+          if (message === "I'M_ALIVE") {
+            return;
           }
 
           if (message === 'PLAYLIST_RECEIVED') {
@@ -977,8 +986,11 @@ export default function App() {
     const ipToUse = ipOverride || hostIp;
 
     if (clientRef.current) {
-      setStatus('Already connected');
-      return;
+      addLog('Closing stale connection before reconnecting');
+      try {
+        clientRef.current.destroy();
+      } catch {}
+      clientRef.current = null;
     }
 
     setStatus(`Connecting to ${ipToUse}:${TCP_PORT}...`);
@@ -990,6 +1002,20 @@ export default function App() {
         setStatus('Node connected');
         addLog('Connected to host');
         writeSocket(client, 'NODE_CONNECTED');
+
+        if (nodeHeartbeatTimerRef.current) {
+          clearInterval(nodeHeartbeatTimerRef.current);
+        }
+
+        nodeHeartbeatTimerRef.current = setInterval(() => {
+          if (clientRef.current) {
+            try {
+              writeSocket(clientRef.current, "I'M_ALIVE");
+            } catch (error) {
+              addLog(`Heartbeat failed: ${String(error)}`);
+            }
+          }
+        }, 5000);
       },
     );
 
@@ -1222,10 +1248,18 @@ export default function App() {
     client.on('error', error => {
       setStatus(`Connection error: ${String(error)}`);
       Alert.alert('Connection error', String(error));
+      if (nodeHeartbeatTimerRef.current) {
+        clearInterval(nodeHeartbeatTimerRef.current);
+        nodeHeartbeatTimerRef.current = null;
+      }
       clientRef.current = null;
     });
 
     client.on('close', () => {
+      if (nodeHeartbeatTimerRef.current) {
+        clearInterval(nodeHeartbeatTimerRef.current);
+        nodeHeartbeatTimerRef.current = null;
+      }
       setStatus('Connection closed');
       clientRef.current = null;
     });
@@ -1237,6 +1271,12 @@ export default function App() {
     if (clientRef.current) {
       clientRef.current.destroy();
       clientRef.current = null;
+
+      if (nodeHeartbeatTimerRef.current) {
+        clearInterval(nodeHeartbeatTimerRef.current);
+        nodeHeartbeatTimerRef.current = null;
+      }
+
       setStatus('Disconnected from host');
       addLog('Disconnected from host');
     }
@@ -1372,78 +1412,81 @@ export default function App() {
     />
   );
 
-  const renderStatusPanel = () => (
-    <View style={styles.panel}>
-      {renderPanelHeader('Party Code')}
-      <Text style={styles.partyCode}>{partyCode || '...'}</Text>
-      <Text style={styles.status}>{hostLocalIp}:5050</Text>
-      <Text style={styles.status}>Status: {status}</Text>
-      <Text style={styles.status}>Nodes: {nodeCount}</Text>
-    </View>
-  );
+  const renderStatusPanel = () => {
+    const isHosting =
+      status.toLowerCase().includes('hosting') ||
+      status.toLowerCase().includes('server') ||
+      status.toLowerCase().includes('listening');
 
-  const renderConnectedSpeakersPanel = () => (
-    <View style={styles.panel}>
-      {renderPanelHeader('Connected Speakers')}
-
-      <View
-        style={{
-          marginTop: 10,
-          padding: 16,
-          borderRadius: 22,
-          backgroundColor: 'rgba(57, 255, 20, 0.06)',
-          borderWidth: 1,
-          borderColor: 'rgba(57, 255, 20, 0.18)',
-        }}>
-        <Text
-          style={{
-            color: '#39ff14',
-            fontSize: 42,
-            fontWeight: '800',
-            textAlign: 'center',
-          }}>
-          {nodeCount}
-        </Text>
+    return (
+      <View style={{width: '100%', gap: 18}}>
+        <SectionLabel>Party Code</SectionLabel>
 
         <Text
           style={{
-            color: '#d7ffe1',
+            color: partyTheme.white,
+            fontSize: 112,
+            lineHeight: 116,
+            fontWeight: '900',
+            letterSpacing: -6,
             textAlign: 'center',
-            fontSize: 15,
-            marginTop: 2,
           }}>
-          {nodeCount === 1 ? 'speaker connected' : 'speakers connected'}
+          {partyCode || '...'}
         </Text>
 
-        <View
+        <PartyCard
           style={{
-            height: 8,
-            borderRadius: 999,
-            overflow: 'hidden',
-            backgroundColor: 'rgba(255,255,255,0.08)',
-            marginTop: 16,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingVertical: 18,
           }}>
-          <View
+          <Text style={{color: partyTheme.muted, fontSize: 16}}>
+            📡 {hostLocalIp}:5050
+          </Text>
+
+          <Text style={{color: partyTheme.muted, fontSize: 16}}>
+            👤 {nodeCount} {nodeCount === 1 ? 'speaker' : 'speakers'}
+          </Text>
+        </PartyCard>
+
+        <PartyButton
+          title={isHosting ? '✅  Hosting Active' : '📡  Start Hosting'}
+          onPress={startHostServer}
+        />
+
+        <PartyCard
+          style={{
+            paddingVertical: 14,
+            backgroundColor: isHosting
+              ? 'rgba(255,255,255,0.075)'
+              : 'rgba(255,255,255,0.045)',
+          }}>
+          <Text
             style={{
-              height: '100%',
-              width: `${Math.min(100, nodeCount * 25)}%`,
-              backgroundColor: '#39ff14',
-            }}
-          />
-        </View>
+              color: isHosting ? partyTheme.white : partyTheme.muted,
+              fontSize: 15,
+              fontWeight: '700',
+              textAlign: 'center',
+            }}>
+            {isHosting
+              ? `Ready for speakers to join${nodeCount > 0 ? ` • ${nodeCount} connected` : ''}`
+              : 'Tap Start Hosting to open the party'}
+          </Text>
 
-        <Text
-          style={{
-            color: '#8fcf9e',
-            textAlign: 'center',
-            marginTop: 12,
-            fontSize: 12,
-          }}>
-          Add more phones to make the party louder.
-        </Text>
+          <Text
+            style={{
+              color: partyTheme.faint,
+              fontSize: 12,
+              marginTop: 6,
+              textAlign: 'center',
+            }}>
+            {status}
+          </Text>
+        </PartyCard>
       </View>
-    </View>
-  );
+    );
+  };
 
   const renderPlaylistPanel = () => (
     <PlaylistPanel
@@ -1558,16 +1601,7 @@ export default function App() {
     return (
       <SafeAreaView style={styles.screen}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
-          <Text style={styles.title}>🎛️ Party Host</Text>
-          <Text style={styles.text}>Control the playlist and speakers.</Text>
-
           {renderStatusPanel()}
-          {renderConnectedSpeakersPanel()}
-
-          <TouchableOpacity style={styles.button} onPress={startHostServer}>
-            <Text style={styles.buttonText}>Start Host Server</Text>
-          </TouchableOpacity>
-
           {renderPlaylistPanel()}
           {renderPartyControls()}
 
@@ -1767,17 +1801,43 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.screen}>
-      <View style={styles.homeContent}>
-        <Text style={styles.title}>PartySpeaker</Text>
-        <Text style={styles.text}>One host. Many phones. Many speakers.</Text>
+      <View style={[styles.homeContent, {alignItems: 'stretch', paddingHorizontal: 24}]}>
+        <Text style={{
+          color: partyTheme.white,
+          fontSize: 54,
+          lineHeight: 58,
+          fontWeight: '900',
+          letterSpacing: -2,
+          textAlign: 'center',
+          marginBottom: 10,
+        }}>
+          PartySpeaker
+        </Text>
 
-        <TouchableOpacity style={styles.button} onPress={() => setMode('host')}>
-          <Text style={styles.buttonText}>Start Party</Text>
-        </TouchableOpacity>
+        <Text style={{
+          color: partyTheme.muted,
+          fontSize: 18,
+          lineHeight: 26,
+          textAlign: 'center',
+          marginBottom: 34,
+        }}>
+          One host. Many phones. One louder little universe.
+        </Text>
 
-        <TouchableOpacity style={styles.button} onPress={() => setMode('node')}>
-          <Text style={styles.buttonText}>Join Party</Text>
-        </TouchableOpacity>
+        <PartyCard style={{gap: 14}}>
+          <PartyButton title="Start Party" onPress={() => setMode('host')} />
+          <PartyButton title="Join Party" onPress={() => setMode('node')} variant="secondary" />
+        </PartyCard>
+
+        <Text style={{
+          color: partyTheme.faint,
+          fontSize: 13,
+          lineHeight: 19,
+          textAlign: 'center',
+          marginTop: 22,
+        }}>
+          Host controls the playlist. Speaker nodes join using the party code.
+        </Text>
       </View>
     </SafeAreaView>
   );
