@@ -1649,145 +1649,216 @@ export default function App() {
   }
 
   if (mode === 'node') {
+    const isConnected = status.toLowerCase().includes('connected');
+
     return (
       <SafeAreaView style={styles.screen}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
-          <Text style={styles.title}>🔊 Speaker Node</Text>
-          <Text style={styles.text}>This phone connects to the host.</Text>
 
-          <Text style={styles.label}>Enter Party Code</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g. 225"
-            placeholderTextColor="#6d8f7b"
-            value={partyCode}
-            onChangeText={setPartyCode}
-            autoCapitalize="none"
-            keyboardType="number-pad"
-          />
+          <PartyCard style={{width: '100%', gap: 16}}>
+            <SectionLabel>Join a Party</SectionLabel>
 
-          <Text style={styles.hint}>
-            Use the number shown on the host screen.
-          </Text>
+            <TextInput
+              style={[
+                styles.input,
+                {
+                  width: '100%',
+                  minHeight: 76,
+                  fontSize: 30,
+                  textAlign: 'center',
+                  backgroundColor: 'rgba(255,255,255,0.055)',
+                  borderColor: partyTheme.border,
+                  color: partyTheme.white,
+                },
+              ]}
+              placeholder="Enter party code"
+              placeholderTextColor="#777"
+              value={partyCode}
+              onChangeText={setPartyCode}
+              autoCapitalize="none"
+              keyboardType="number-pad"
+            />
 
-          <TouchableOpacity style={styles.button} onPress={connectWithPartyCode}>
-            <Text style={styles.buttonText}>Join With Party Code</Text>
-          </TouchableOpacity>
+            <PartyButton
+              title={isConnected ? '✅ Connected' : '↪ Join Party'}
+              onPress={connectWithPartyCode}
+            />
 
+            <Text style={{color: partyTheme.muted, textAlign: 'center'}}>
+              {isConnected ? 'You are connected to the party' : 'Use the code shown on the host screen'}
+            </Text>
+          </PartyCard>
 
+          <PartyCard style={{width: '100%', marginTop: 18}}>
+            <SectionLabel>Speaker Status</SectionLabel>
 
-          <View style={styles.panel}>
-            {renderPanelHeader('Now Playing')}
+            <Text style={{color: partyTheme.white, fontSize: 34, fontWeight: '900'}}>
+              {isConnected ? 'Connected' : 'Not Connected'}
+            </Text>
 
-            <View
-              style={{
-                marginTop: 18,
-                marginBottom: 24,
-                borderRadius: 30,
-                padding: 22,
-                backgroundColor: 'rgba(255,255,255,0.04)',
-                borderWidth: 1,
-                borderColor: 'rgba(255,255,255,0.08)',
-                shadowColor: '#39ff14',
-                shadowOpacity: 0.15,
-                shadowRadius: 20,
-                elevation: 8,
-              }}>
-              <NowPlayingArtwork
-                title={currentTrackMetadata.title || currentTrackName}
-                artworkUri={currentTrackMetadata.artworkUri}
-              />
+            <Text style={{color: partyTheme.muted, marginTop: 6}}>
+              {status}
+            </Text>
+          </PartyCard>
 
-              <TrackInfo
-                metadata={{
-                  title: currentTrackMetadata.title || currentTrackName || 'Waiting for track',
-                  artist: currentTrackMetadata.artist || 'Waiting for metadata',
-                  album: currentTrackMetadata.album || 'Speaker Node',
-                  artworkUri: currentTrackMetadata.artworkUri,
-                  durationMs: currentTrackMetadata.durationMs,
-                }}
-              />
-
-              <Text style={styles.status}>Playback: {nowPlayingText}</Text>
-              <Text style={styles.status}>Position: {playbackPositionText}</Text>
-
-              <AudioVisualiser
-                isActive={
-                  currentTrackName.trim().length > 0 &&
-                  currentTrackName !== 'No track selected'
-                }
-                label={
-                  currentTrackName.trim().length > 0 && currentTrackName !== 'No track selected'
-                    ? 'Visualiser synced to playback clock'
-                    : 'Waiting for host playback'
-                }
-                playbackPositionText={playbackPositionText}
-                                  />
+          <View style={{width: '100%', marginTop: 24}}>
+            <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+              <SectionLabel>Playlist</SectionLabel>
+              <Text style={{color: partyTheme.muted, fontWeight: '800'}}>
+                {playlist.length} {playlist.length === 1 ? 'Track' : 'Tracks'}
+              </Text>
             </View>
-          </View>
 
-          <View style={styles.panel}>
-            {renderPanelHeader('Synced Playlist Preview')}
             {playlist.length === 0 ? (
-              <Text style={styles.logText}>No playlist received yet</Text>
+              <PartyCard>
+                <Text style={{color: partyTheme.muted, textAlign: 'center'}}>
+                  No playlist received yet
+                </Text>
+              </PartyCard>
             ) : (
-              playlist.map((track, index) => {
-                const selected = selectedTrackId === track.id;
+              <View style={{gap: 10}}>
+                {playlist.map((track, index) => {
+                  const selected = selectedTrackId === track.id;
 
-                return (
-                  <TouchableOpacity
-                    key={track.id}
-                    style={selected ? styles.trackSelected : styles.trackRow}
-                    onPress={() => {
-                      setSelectedTrackId(track.id);
-                      setCurrentTrackName(track.name);
-                    }}>
-                    <Text style={selected ? styles.trackTextSelected : styles.trackText}>
-                      {index + 1}. {track.name}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })
+                  return (
+                    <TouchableOpacity
+                      key={track.id}
+                      activeOpacity={0.82}
+                      style={{
+                        minHeight: 86,
+                        borderRadius: 22,
+                        paddingHorizontal: 18,
+                        paddingVertical: 14,
+                        backgroundColor: selected ? partyTheme.white : partyTheme.card,
+                        borderColor: partyTheme.border,
+                        borderWidth: 1,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 14,
+                      }}
+                      onPress={() => {
+                        setSelectedTrackId(track.id);
+                        setCurrentTrackName(track.name);
+                      }}>
+                      <Text style={{
+                        color: selected ? partyTheme.black : partyTheme.white,
+                        fontSize: 24,
+                        fontWeight: '900',
+                        width: 28,
+                      }}>
+                        {index + 1}
+                      </Text>
+
+                      <View style={{
+                        width: 56,
+                        height: 56,
+                        borderRadius: 16,
+                        backgroundColor: selected ? 'rgba(0,0,0,0.12)' : partyTheme.cardStrong,
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                      }}>
+                        <Text style={{
+                          color: selected ? partyTheme.black : partyTheme.white,
+                          fontSize: 24,
+                          fontWeight: '900',
+                        }}>
+                          {track.name.trim()[0]?.toUpperCase() || '♪'}
+                        </Text>
+                      </View>
+
+                      <View style={{flex: 1}}>
+                        <Text
+                          numberOfLines={1}
+                          style={{
+                            color: selected ? partyTheme.black : partyTheme.white,
+                            fontSize: 18,
+                            fontWeight: '900',
+                          }}>
+                          {track.name.replace(/\.[^.]+$/, '')}
+                        </Text>
+
+                        <Text
+                          numberOfLines={1}
+                          style={{
+                            color: selected ? 'rgba(0,0,0,0.55)' : partyTheme.muted,
+                            fontSize: 14,
+                            marginTop: 3,
+                          }}>
+                          Synced from host
+                        </Text>
+                      </View>
+
+                      <Text style={{color: selected ? partyTheme.black : partyTheme.muted, fontSize: 28}}>
+                        ⋮
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             )}
           </View>
 
-          <NodeStatusPanel
-            styles={styles}
-            status={status}
-            nowPlayingText={nowPlayingText}
-            playbackPositionText={playbackPositionText}
-            hostClockOffsetMs={hostClockOffsetMs}
-            nodePlaybackDelayMs={nodePlaybackDelayMs}
-            subnetPrefix={subnetPrefix}
-            lastMessage={lastMessage}
-          />
+          <PartyCard style={{width: '100%', marginTop: 24}}>
+            <SectionLabel>Now Playing</SectionLabel>
 
-          <TouchableOpacity
-            style={styles.secondaryButton}
-            onPress={() => setShowNodeDebugTools(previous => !previous)}>
-            <Text style={styles.secondaryButtonText}>
-              {showNodeDebugTools ? 'Hide Developer Tools ▲' : 'Developer Tools ▼'}
+            <NowPlayingArtwork
+              title={currentTrackMetadata.title || currentTrackName}
+              artworkUri={currentTrackMetadata.artworkUri}
+            />
+
+            <TrackInfo
+              metadata={{
+                title: currentTrackMetadata.title || currentTrackName || 'Waiting for track',
+                artist: currentTrackMetadata.artist || 'Waiting for metadata',
+                album: currentTrackMetadata.album || 'Speaker Node',
+                artworkUri: currentTrackMetadata.artworkUri,
+                durationMs: currentTrackMetadata.durationMs,
+              }}
+            />
+
+            <Text style={{color: partyTheme.muted, textAlign: 'center', marginTop: 8}}>
+              {nowPlayingText}
             </Text>
-          </TouchableOpacity>
+
+            <Text style={{color: partyTheme.faint, textAlign: 'center', marginTop: 4}}>
+              {playbackPositionText}
+            </Text>
+          </PartyCard>
+
+          <PartyButton
+            title={showNodeDebugTools ? 'Hide Developer Tools ▲' : 'Developer Tools ▼'}
+            onPress={() => setShowNodeDebugTools(previous => !previous)}
+            variant="secondary"
+            style={{width: '100%', marginTop: 22}}
+          />
 
           {showNodeDebugTools ? (
-            <View style={styles.panel}>
-              {renderPanelHeader('Developer Tools')}
+            <PartyCard style={{width: '100%', marginTop: 14}}>
+              <SectionLabel>Developer Tools</SectionLabel>
 
-          <NodeDelayCalibration
-            styles={styles}
-            nodePlaybackDelayMs={nodePlaybackDelayMs}
-            adjustNodeDelay={adjustNodeDelay}
-            resetNodeDelay={resetNodeDelay}
-          />
+              <NodeStatusPanel
+                styles={styles}
+                status={status}
+                nowPlayingText={nowPlayingText}
+                playbackPositionText={playbackPositionText}
+                hostClockOffsetMs={hostClockOffsetMs}
+                nodePlaybackDelayMs={nodePlaybackDelayMs}
+                subnetPrefix={subnetPrefix}
+                lastMessage={lastMessage}
+              />
 
+              <NodeDelayCalibration
+                styles={styles}
+                nodePlaybackDelayMs={nodePlaybackDelayMs}
+                adjustNodeDelay={adjustNodeDelay}
+                resetNodeDelay={resetNodeDelay}
+              />
 
-
-              <Text style={styles.label}>Developer Manual Host IP</Text>
+              <Text style={styles.label}>Manual Host IP</Text>
               <TextInput
                 style={styles.input}
                 placeholder="Host IP address"
-                placeholderTextColor="#6d8f7b"
+                placeholderTextColor="#666"
                 value={hostIp}
                 onChangeText={setHostIp}
                 autoCapitalize="none"
@@ -1808,24 +1879,29 @@ export default function App() {
                 </Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.button} onPress={sendAliveToHost}>
-                <Text style={styles.buttonText}>Send I'm Alive</Text>
+              <TouchableOpacity style={styles.secondaryButton} onPress={sendAliveToHost}>
+                <Text style={styles.secondaryButtonText}>Send I'm Alive</Text>
               </TouchableOpacity>
-            </View>
+
+              {renderLog()}
+            </PartyCard>
           ) : null}
 
-          <TouchableOpacity style={styles.secondaryButton} onPress={disconnectFromHost}>
-            <Text style={styles.secondaryButtonText}>Disconnect</Text>
-          </TouchableOpacity>
+          <View style={{width: '100%', flexDirection: 'row', gap: 12, marginTop: 22}}>
+            <PartyButton
+              title="Disconnect"
+              onPress={disconnectFromHost}
+              variant="secondary"
+              style={{flex: 1}}
+            />
 
-          {renderLog()}
-
-          <PartyButton
-            title="Back"
-            onPress={() => setMode('home')}
-            variant="secondary"
-            style={{width: '100%', marginTop: 28}}
-          />
+            <PartyButton
+              title="Back"
+              onPress={() => setMode('home')}
+              variant="secondary"
+              style={{flex: 1}}
+            />
+          </View>
         </ScrollView>
       </SafeAreaView>
     );
