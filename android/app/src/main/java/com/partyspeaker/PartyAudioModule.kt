@@ -4,18 +4,12 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.database.Cursor
-import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
-import android.media.AudioPlaybackCaptureConfiguration
-import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaPlayer
 import android.media.ToneGenerator
-import android.media.projection.MediaProjection
-import android.media.projection.MediaProjectionManager
 import android.net.Uri
-import android.os.Build
 import android.os.Handler
 import android.util.Base64
 import java.io.File
@@ -23,7 +17,6 @@ import java.io.FileOutputStream
 import java.net.NetworkInterface
 import android.os.Looper
 import android.provider.OpenableColumns
-import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -38,24 +31,16 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 import kotlin.concurrent.thread
 import kotlin.math.PI
 import kotlin.math.sin
-import kotlin.math.sqrt
 
 class PartyAudioModule(
     private val reactContext: ReactApplicationContext
 ) : ReactContextBaseJavaModule(reactContext) {
 
-    private val requestMediaProjectionCode = 9911
     private val requestPickAudioCode = 9922
 
-    private var mediaProjectionManager: MediaProjectionManager? = null
-    private var mediaProjection: MediaProjection? = null
-    private var audioRecord: AudioRecord? = null
-    private var captureRunning = false
-    private var capturePromise: Promise? = null
     private var pickAudioPromise: Promise? = null
     private var currentPlayer: MediaPlayer? = null
     private var currentExoPlayer: ExoPlayer? = null
-    private var playbackVisualizerEnabled = false
     private var playbackLevelRunning = false
     private var playbackLevelHandler: Handler? = null
 
@@ -68,7 +53,6 @@ class PartyAudioModule(
                 data: Intent?
             ) {
                 when (requestCode) {
-                    requestMediaProjectionCode -> handleMediaProjectionResult(resultCode, data)
                     requestPickAudioCode -> handlePickAudioResult(resultCode, data)
                 }
             }
@@ -85,39 +69,6 @@ class PartyAudioModule(
 
     @ReactMethod
     fun removeListeners(count: Int) {}
-
-    private fun handleMediaProjectionResult(resultCode: Int, data: Intent?) {
-        if (resultCode != Activity.RESULT_OK || data == null) {
-            capturePromise?.reject(
-                "CAPTURE_PERMISSION_DENIED",
-                "Audio capture permission was denied"
-            )
-            capturePromise = null
-            emitCaptureStatus("Permission denied")
-            return
-        }
-
-        try {
-            val manager = mediaProjectionManager
-            if (manager == null) {
-                capturePromise?.reject(
-                    "CAPTURE_MANAGER_MISSING",
-                    "MediaProjectionManager was not available"
-                )
-                capturePromise = null
-                return
-            }
-
-            mediaProjection = manager.getMediaProjection(resultCode, data)
-            startAudioPlaybackCapture()
-            capturePromise?.resolve(true)
-            capturePromise = null
-        } catch (error: Exception) {
-            capturePromise?.reject("CAPTURE_START_ERROR", error)
-            capturePromise = null
-            emitCaptureStatus("Capture start error: ${error.message}")
-        }
-    }
 
     private fun handlePickAudioResult(resultCode: Int, data: Intent?) {
         if (resultCode != Activity.RESULT_OK || data?.data == null) {
@@ -336,9 +287,6 @@ class PartyAudioModule(
             player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
 
             player.addListener(object : Player.Listener {
-                override fun onAudioSessionIdChanged(audioSessionId: Int) {
-                    startRealPlaybackVisualizer(audioSessionId)
-                }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_READY) {
@@ -361,26 +309,6 @@ class PartyAudioModule(
             promise.reject("PLAY_CACHED_TRACK_ERROR", error)
         }
     }
-
-    @ReactMethod
-    fun setPlaybackVisualizerEnabled(enabled: Boolean, promise: Promise) {
-        playbackVisualizerEnabled = enabled
-
-        if (!enabled) {
-            stopRealPlaybackVisualizer()
-        }
-
-        promise.resolve(true)
-    }
-
-    private fun startRealPlaybackVisualizer(audioSessionId: Int) {
-        // Disabled. Host visualiser uses generated synced bars for now.
-    }
-
-    private fun stopRealPlaybackVisualizer() {
-        // Disabled.
-    }
-
 
 
     private fun startPlaybackLevelEvents() {
@@ -449,7 +377,6 @@ class PartyAudioModule(
         }
 
         stopPlaybackLevelEvents()
-        stopRealPlaybackVisualizer()
 
         try {
             currentPlayer?.stop()
@@ -503,9 +430,6 @@ class PartyAudioModule(
             var resolved = false
 
             player.addListener(object : Player.Listener {
-                override fun onAudioSessionIdChanged(audioSessionId: Int) {
-                    startRealPlaybackVisualizer(audioSessionId)
-                }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_READY && !resolved) {
@@ -607,165 +531,8 @@ class PartyAudioModule(
         }
     }
 
-    @ReactMethod
-    fun startAudioCaptureTest(promise: Promise) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            promise.reject(
-                "CAPTURE_NOT_SUPPORTED",
-                "Audio playback capture requires Android 10 or newer"
-            )
-            return
-        }
-
-        if (captureRunning) {
-            promise.resolve(true)
-            return
-        }
-
-        val activity = reactContext.currentActivity
-        if (activity == null) {
-            promise.reject("NO_ACTIVITY", "No active Android activity was found")
-            return
-        }
-
-        capturePromise = promise
-
-        val serviceIntent = Intent(reactContext, PartyCaptureService::class.java)
-        ContextCompat.startForegroundService(reactContext, serviceIntent)
-
-        mediaProjectionManager =
-            reactContext.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-
-        val captureIntent = mediaProjectionManager!!.createScreenCaptureIntent()
-        activity.startActivityForResult(captureIntent, requestMediaProjectionCode)
-    }
-
-    @ReactMethod
-    fun stopAudioCaptureTest(promise: Promise) {
-        try {
-            stopCaptureInternal()
-            promise.resolve(true)
-        } catch (error: Exception) {
-            promise.reject("CAPTURE_STOP_ERROR", error)
-        }
-    }
-
-    private fun startAudioPlaybackCapture() {
-        val projection = mediaProjection
-            ?: throw IllegalStateException("MediaProjection is missing")
-
-        val sampleRate = 44100
-        val channelMask = AudioFormat.CHANNEL_IN_MONO
-        val encoding = AudioFormat.ENCODING_PCM_16BIT
-
-        val audioFormat = AudioFormat.Builder()
-            .setSampleRate(sampleRate)
-            .setChannelMask(channelMask)
-            .setEncoding(encoding)
-            .build()
-
-        val captureConfig = AudioPlaybackCaptureConfiguration.Builder(projection)
-            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-            .addMatchingUsage(AudioAttributes.USAGE_GAME)
-            .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
-            .build()
-
-        val minBufferSize = AudioRecord.getMinBufferSize(
-            sampleRate,
-            channelMask,
-            encoding
-        )
-
-        val bufferSize = maxOf(minBufferSize, 4096)
-
-        val recorder = AudioRecord.Builder()
-            .setAudioFormat(audioFormat)
-            .setAudioPlaybackCaptureConfig(captureConfig)
-            .setBufferSizeInBytes(bufferSize)
-            .build()
-
-        audioRecord = recorder
-        captureRunning = true
-
-        recorder.startRecording()
-        emitCaptureStatus("Capture running")
-
-        thread(start = true) {
-            val buffer = ShortArray(2048)
-            var lastEmitTime = 0L
-
-            while (captureRunning) {
-                val readCount = recorder.read(buffer, 0, buffer.size)
-
-                if (readCount > 0) {
-                    var sum = 0.0
-
-                    for (i in 0 until readCount) {
-                        val sample = buffer[i].toDouble()
-                        sum += sample * sample
-                    }
-
-                    val rms = sqrt(sum / readCount)
-                    val level = (rms / Short.MAX_VALUE).coerceIn(0.0, 1.0)
-
-                    val now = System.currentTimeMillis()
-                    if (now - lastEmitTime > 120) {
-                        lastEmitTime = now
-                        emitCaptureLevel(level)
-                    }
-                }
-            }
-        }
-    }
-
-    private fun stopCaptureInternal() {
-        captureRunning = false
-
-        try {
-            audioRecord?.stop()
-        } catch (_: Exception) {}
-
-        try {
-            audioRecord?.release()
-        } catch (_: Exception) {}
-
-        audioRecord = null
-
-        try {
-            mediaProjection?.stop()
-        } catch (_: Exception) {}
-
-        mediaProjection = null
-
-        try {
-            reactContext.stopService(Intent(reactContext, PartyCaptureService::class.java))
-        } catch (_: Exception) {}
-
-        emitCaptureLevel(0.0)
-        emitCaptureStatus("Capture stopped")
-    }
-
-    private fun emitCaptureLevel(level: Double) {
-        val params = Arguments.createMap()
-        params.putDouble("level", level)
-
-        reactContext
-            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-            .emit("partyAudioCaptureLevel", params)
-    }
-
-    private fun emitCaptureStatus(status: String) {
-        val params = Arguments.createMap()
-        params.putString("status", status)
-
-        reactContext
-            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-            .emit("partyAudioCaptureStatus", params)
-    }
-
     override fun invalidate() {
         super.invalidate()
         stopCurrentPlayer()
-        stopCaptureInternal()
     }
 }

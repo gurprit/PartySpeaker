@@ -9,12 +9,10 @@ import PartyCard from './src/components/ui/PartyCard';
 import PartyButton from './src/components/ui/PartyButton';
 import SectionLabel from './src/components/ui/SectionLabel';
 import {partyTheme} from './src/components/ui/PartyTheme';
-import AudioVisualiser from './src/components/visualiser/AudioVisualiser';
 import {TrackMetadata} from './src/types/TrackMetadata';
 import React, {useEffect, useRef, useState} from 'react';
 import {
   Alert,
-  NativeEventEmitter,
   NativeModules,
   SafeAreaView,
   Text,
@@ -65,8 +63,6 @@ export default function App() {
   const [discoveredHost, setDiscoveredHost] = useState<DiscoveredHost | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [countdownText, setCountdownText] = useState('Not scheduled');
-  const [captureStatus, setCaptureStatus] = useState('Not running');
-  const [captureLevel, setCaptureLevel] = useState(0);
   const [showDebugTools, setShowDebugTools] = useState(false);
   const [showNodeDebugTools, setShowNodeDebugTools] = useState(false);
   const [hostLocalIp, setHostLocalIp] = useState('Unknown');
@@ -109,21 +105,6 @@ export default function App() {
 
   useEffect(() => {
     refreshHostAddress();
-
-    const eventEmitter = new NativeEventEmitter(PartyAudio);
-
-    const levelSub = eventEmitter.addListener('partyAudioCaptureLevel', event => {
-      setCaptureLevel(event.level || 0);
-    });
-
-    const statusSub = eventEmitter.addListener('partyAudioCaptureStatus', event => {
-      setCaptureStatus(event.status || 'Unknown');
-    });
-
-    return () => {
-      levelSub.remove();
-      statusSub.remove();
-    };
   }, []);
 
   const addLog = (message: string) => {
@@ -332,29 +313,6 @@ export default function App() {
       addLog('Stopped local track');
     } catch (error) {
       addLog(`Stop track error: ${String(error)}`);
-    }
-  };
-
-  const startAudioCaptureTest = async () => {
-    try {
-      await PartyAudio.startAudioCaptureTest();
-      setCaptureStatus('Capture starting...');
-      addLog('Audio capture test started');
-    } catch (error) {
-      addLog(`Capture error: ${String(error)}`);
-      Alert.alert('Capture error', String(error));
-    }
-  };
-
-  const stopAudioCaptureTest = async () => {
-    try {
-      await PartyAudio.stopAudioCaptureTest();
-      setCaptureStatus('Capture stopped');
-      setCaptureLevel(0);
-      addLog('Audio capture test stopped');
-    } catch (error) {
-      addLog(`Stop capture error: ${String(error)}`);
-      Alert.alert('Stop capture error', String(error));
     }
   };
 
@@ -1390,11 +1348,6 @@ export default function App() {
   };
 
   const clearLog = () => setLog([]);
-
-  useEffect(() => {
-    PartyAudio.setPlaybackVisualizerEnabled?.(mode === 'host').catch(() => {});
-  }, [mode]);
-
 
   useEffect(() => {
     if (mode !== 'host') {
