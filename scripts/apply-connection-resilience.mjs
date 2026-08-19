@@ -46,23 +46,6 @@ replaceOnce(
   `          nodeCachedTrackIdsRef.current.add(payload.id);\n          setTrackProgress(payload.id, 100);\n          setStatus(\`Track cached: ${'${'}payload.name}\`);\n          addLog(\`Native download complete: ${'${'}payload.name}\`);\n          writeSocket(client, \`TRACK_RECEIVED|${'${'}payload.id}|${'${'}payload.name}\`);`,
 );
 
-// Only use live sockets for readiness and download targeting.
-source = source.replaceAll(
-  'clientsRef.current.filter(socket => {',
-  'clientsRef.current.filter(socket => isSocketUsable(socket) && (() => {',
-);
-source = source.replaceAll(
-  '    });\n\n    if (missingSockets.length === 0) {',
-  '    })());\n\n    if (missingSockets.length === 0) {',
-);
-
-// The targeted replacement above is intentionally conservative; undo it if the
-// expected native-transfer function shape was not matched cleanly.
-if (source.includes('filter(socket => isSocketUsable(socket) && (() => {') && !source.includes('})());\n\n    if (missingSockets.length === 0)')) {
-  throw new Error('Patch failed: live download socket filter');
-}
-
-// Keep host broadcasts from retaining dead sockets indefinitely.
 replaceOnce(
   'broadcast prune',
   `    clientsRef.current.forEach(socket => {\n      writeSocket(socket, \`NOW_PLAYING|${'${'}JSON.stringify(payload)}\`);\n    });`,
