@@ -115,6 +115,7 @@ export default function App() {
   const currentlyPlayingTrackRef = useRef<string | null>(null);
   const transferBuffersRef = useRef<Record<string, {name: string; chunks: string[]}>>({});
   const cachedTracksRef = useRef<Record<string, string[]>>({});
+  const nodeCachedTrackIdsRef = useRef<Set<string>>(new Set());
   const activeTransferIdsRef = useRef<Set<string>>(new Set());
   const transferAckRef = useRef<Record<string, number>>({});
 
@@ -127,8 +128,34 @@ export default function App() {
     setLog(previous => [`${time}  ${message}`, ...previous].slice(0, 14));
   };
 
+  const isSocketUsable = (socket: any) => {
+    return Boolean(socket) && socket.destroyed !== true && socket.writable !== false;
+  };
+
+  const pruneHostSocket = (socket: any, reason = 'socket unavailable') => {
+    const before = clientsRef.current.length;
+    clientsRef.current = clientsRef.current.filter(item => item !== socket && isSocketUsable(item));
+
+    if (clientsRef.current.length !== before) {
+      setNodeCount(clientsRef.current.length);
+      addLog(`Pruned speaker (${reason}); ${clientsRef.current.length} connected`);
+    }
+  };
+
   const writeSocket = (socket: any, message: string) => {
-    socket.write(`${message}\n`);
+    if (!isSocketUsable(socket)) {
+      pruneHostSocket(socket, 'write skipped: closed');
+      return false;
+    }
+
+    try {
+      socket.write(`${message}\n`);
+      return true;
+    } catch (error) {
+      pruneHostSocket(socket, `write failed: ${String(error)}`);
+      addLog(`Socket write ignored: ${String(error)}`);
+      return false;
+    }
   };
 
   const refreshHostAddress = async () => {
@@ -215,6 +242,8 @@ export default function App() {
       hostNowMs: Date.now(),
     };
 
+    clientsRef.current = clientsRef.current.filter(isSocketUsable);
+    setNodeCount(clientsRef.current.length);
     clientsRef.current.forEach(socket => {
       writeSocket(socket, `NOW_PLAYING|${JSON.stringify(payload)}`);
     });
@@ -460,6 +489,34 @@ export default function App() {
             addLog('Node confirmed playlist sync');
           }
 
+          if (message.startsWith('NODE_CACHE_STATE|')) {
+            try {
+              const cachedIds = JSON.parse(message.replace('NODE_CACHE_STATE|', ''));
+              const key = socket.remoteAddress || 'unknown';
+              cachedTracksRef.current[key] = Array.isArray(cachedIds) ? cachedIds : [];
+              addLog(`Speaker cache restored: ${cachedTracksRef.current[key].length} track(s)`);
+
+              const selected = getSelectedTrack();
+              if (selected) {
+                const liveSockets = clientsRef.current.filter(isSocketUsable);
+                const readyCount = liveSockets.filter(clientSocket => {
+                  const clientKey = clientSocket.remoteAddress || 'unknown';
+                  return cachedTracksRef.current[clientKey]?.includes(selected.id);
+                }).length;
+
+                if (liveSockets.length > 0 && readyCount === liveSockets.length) {
+                  setTrackProgress(selected.id, 100);
+                  setTransferProgress(100);
+                  setTransferProgressText(`Ready: ${selected.name}`);
+                  setStatus(`Ready on all speakers: ${selected.name}`);
+                }
+              }
+            } catch (error) {
+              addLog(`Invalid cache-state message: ${String(error)}`);
+            }
+            return;
+          }
+
           if (message.startsWith('TRACK_RECEIVED|')) {
             const parts = message.split('|');
             const trackId = parts[1];
@@ -513,6 +570,7 @@ export default function App() {
       });
 
       (socket as any).on('error', (error: any) => {
+        pruneHostSocket(socket, String(error));
         setStatus(`Socket error: ${String(error)}`);
         addLog(`Socket error: ${String(error)}`);
       });
@@ -976,6 +1034,7 @@ export default function App() {
         setStatus('Node connected');
         addLog('Connected to host');
         writeSocket(client, 'NODE_CONNECTED');
+        writeSocket(client, `NODE_CACHE_STATE|${JSON.stringify(Array.from(nodeCachedTrackIdsRef.current))}`);
 
         if (nodeHeartbeatTimerRef.current) {
           clearInterval(nodeHeartbeatTimerRef.current);
@@ -1018,6 +1077,7 @@ export default function App() {
             payload.name,
           );
 
+          nodeCachedTrackIdsRef.current.add(payload.id);
           setTrackProgress(payload.id, 100);
           setStatus(`Track cached: ${payload.name}`);
           addLog(`Native download complete: ${payload.name}`);

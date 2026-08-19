@@ -100510,6 +100510,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     var currentlyPlayingTrackRef = (0, _react.useRef)(null);
     var transferBuffersRef = (0, _react.useRef)({});
     var cachedTracksRef = (0, _react.useRef)({});
+    var nodeCachedTrackIdsRef = (0, _react.useRef)(new Set());
     var activeTransferIdsRef = (0, _react.useRef)(new Set());
     var transferAckRef = (0, _react.useRef)({});
     (0, _react.useEffect)(() => {
@@ -100519,8 +100520,30 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       var time = new Date().toLocaleTimeString();
       setLog(previous => [`${time}  ${message}`, ...previous].slice(0, 14));
     };
+    var isSocketUsable = socket => {
+      return Boolean(socket) && socket.destroyed !== true && socket.writable !== false;
+    };
+    var pruneHostSocket = (socket, reason = 'socket unavailable') => {
+      var before = clientsRef.current.length;
+      clientsRef.current = clientsRef.current.filter(item => item !== socket && isSocketUsable(item));
+      if (clientsRef.current.length !== before) {
+        setNodeCount(clientsRef.current.length);
+        addLog(`Pruned speaker (${reason}); ${clientsRef.current.length} connected`);
+      }
+    };
     var writeSocket = (socket, message) => {
-      socket.write(`${message}\n`);
+      if (!isSocketUsable(socket)) {
+        pruneHostSocket(socket, 'write skipped: closed');
+        return false;
+      }
+      try {
+        socket.write(`${message}\n`);
+        return true;
+      } catch (error) {
+        pruneHostSocket(socket, `write failed: ${String(error)}`);
+        addLog(`Socket write ignored: ${String(error)}`);
+        return false;
+      }
     };
     var refreshHostAddress = /*#__PURE__*/function () {
       var _ref = (0, _asyncToGenerator2.default)(function* () {
@@ -100595,6 +100618,8 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         ...nowPlayingRef.current,
         hostNowMs: Date.now()
       };
+      clientsRef.current = clientsRef.current.filter(isSocketUsable);
+      setNodeCount(clientsRef.current.length);
       clientsRef.current.forEach(socket => {
         writeSocket(socket, `NOW_PLAYING|${JSON.stringify(payload)}`);
       });
@@ -100829,16 +100854,41 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                 setPlaylistSyncedNodeCount(previous => previous + 1);
                 addLog('Node confirmed playlist sync');
               }
+              if (message.startsWith('NODE_CACHE_STATE|')) {
+                try {
+                  var cachedIds = JSON.parse(message.replace('NODE_CACHE_STATE|', ''));
+                  var key = socket.remoteAddress || 'unknown';
+                  cachedTracksRef.current[key] = Array.isArray(cachedIds) ? cachedIds : [];
+                  addLog(`Speaker cache restored: ${cachedTracksRef.current[key].length} track(s)`);
+                  var selected = getSelectedTrack();
+                  if (selected) {
+                    var liveSockets = clientsRef.current.filter(isSocketUsable);
+                    var readyCount = liveSockets.filter(clientSocket => {
+                      var clientKey = clientSocket.remoteAddress || 'unknown';
+                      return cachedTracksRef.current[clientKey]?.includes(selected.id);
+                    }).length;
+                    if (liveSockets.length > 0 && readyCount === liveSockets.length) {
+                      setTrackProgress(selected.id, 100);
+                      setTransferProgress(100);
+                      setTransferProgressText(`Ready: ${selected.name}`);
+                      setStatus(`Ready on all speakers: ${selected.name}`);
+                    }
+                  }
+                } catch (error) {
+                  addLog(`Invalid cache-state message: ${String(error)}`);
+                }
+                return;
+              }
               if (message.startsWith('TRACK_RECEIVED|')) {
                 var parts = message.split('|');
                 var trackId = parts[1];
                 var trackName = parts[2] || '';
-                var key = socket.remoteAddress || 'unknown';
-                if (!cachedTracksRef.current[key]) {
-                  cachedTracksRef.current[key] = [];
+                var _key = socket.remoteAddress || 'unknown';
+                if (!cachedTracksRef.current[_key]) {
+                  cachedTracksRef.current[_key] = [];
                 }
-                if (!cachedTracksRef.current[key].includes(trackId)) {
-                  cachedTracksRef.current[key].push(trackId);
+                if (!cachedTracksRef.current[_key].includes(trackId)) {
+                  cachedTracksRef.current[_key].push(trackId);
                 }
                 var cachedCount = clientsRef.current.filter(clientSocket => {
                   var clientKey = clientSocket.remoteAddress || 'unknown';
@@ -100875,6 +100925,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
             addLog('Node disconnected');
           });
           socket.on('error', error => {
+            pruneHostSocket(socket, String(error));
             setStatus(`Socket error: ${String(error)}`);
             addLog(`Socket error: ${String(error)}`);
           });
@@ -101273,6 +101324,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         setStatus('Node connected');
         addLog('Connected to host');
         writeSocket(client, 'NODE_CONNECTED');
+        writeSocket(client, `NODE_CACHE_STATE|${JSON.stringify(Array.from(nodeCachedTrackIdsRef.current))}`);
         if (nodeHeartbeatTimerRef.current) {
           clearInterval(nodeHeartbeatTimerRef.current);
         }
@@ -101301,6 +101353,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
               setTrackProgress(payload.id, 1);
               addLog(`Native download started: ${payload.name}`);
               yield PartyAudio.downloadTrackFromHost(ipToUse, TRANSFER_PORT, payload.id, payload.name);
+              nodeCachedTrackIdsRef.current.add(payload.id);
               setTrackProgress(payload.id, 100);
               setStatus(`Track cached: ${payload.name}`);
               addLog(`Native download complete: ${payload.name}`);
