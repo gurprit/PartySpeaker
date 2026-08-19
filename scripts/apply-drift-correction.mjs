@@ -49,15 +49,15 @@ app = replaceOnce(
 app = replaceOnce(
   app,
   'start drift after catchup',
-  `      currentlyPlayingTrackRef.current = trackId;\n      addLog(\`Playing cached track from ${'${'}Math.round(safePosition)}ms: ${'${'}trackName}\`);`,
-  `      currentlyPlayingTrackRef.current = trackId;\n      startNodeDriftMonitor();\n      addLog(\`Playing cached track from ${'${'}Math.round(safePosition)}ms: ${'${'}trackName}\`);`,
+  `      currentlyPlayingTrackRef.current = trackId;\n      addLog(\`Catch-up playing ${'${'}trackName} from ${'${'}formatMs(safePosition)}\`);`,
+  `      currentlyPlayingTrackRef.current = trackId;\n      startNodeDriftMonitor();\n      addLog(\`Catch-up playing ${'${'}trackName} from ${'${'}formatMs(safePosition)}\`);`,
 );
 
 app = replaceOnce(
   app,
   'start drift after scheduled play',
-  `      currentlyPlayingTrackRef.current = trackId;\n      setStatus(\`Playing cached track: ${'${'}trackName}\`);`,
-  `      currentlyPlayingTrackRef.current = trackId;\n      startNodeDriftMonitor();\n      setStatus(\`Playing cached track: ${'${'}trackName}\`);`,
+  `        currentlyPlayingTrackRef.current = trackId;\n        addLog(\`Playing scheduled cached track: ${'${'}trackName}\`);`,
+  `        currentlyPlayingTrackRef.current = trackId;\n        startNodeDriftMonitor();\n        addLog(\`Playing scheduled cached track: ${'${'}trackName}\`);`,
 );
 
 app = replaceOnce(
