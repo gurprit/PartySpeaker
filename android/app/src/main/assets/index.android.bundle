@@ -100355,19 +100355,28 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
   var _PartyCard = _interopRequireDefault(_$$_REQUIRE(_dependencyMap[10], "./src/components/ui/PartyCard"));
   var _PartyButton = _interopRequireDefault(_$$_REQUIRE(_dependencyMap[11], "./src/components/ui/PartyButton"));
   var _SectionLabel = _interopRequireDefault(_$$_REQUIRE(_dependencyMap[12], "./src/components/ui/SectionLabel"));
-  var _react = _interopRequireWildcard(_$$_REQUIRE(_dependencyMap[13], "react"));
-  var _reactNative = _$$_REQUIRE(_dependencyMap[14], "react-native");
-  var _reactNativeTcpSocket = _interopRequireDefault(_$$_REQUIRE(_dependencyMap[15], "react-native-tcp-socket"));
-  var _reactNativeUdp = _interopRequireDefault(_$$_REQUIRE(_dependencyMap[16], "react-native-udp"));
-  var _jsxRuntime = _$$_REQUIRE(_dependencyMap[17], "react/jsx-runtime");
+  var _MetadataService = _interopRequireDefault(_$$_REQUIRE(_dependencyMap[13], "./src/services/MetadataService"));
+  var _react = _interopRequireWildcard(_$$_REQUIRE(_dependencyMap[14], "react"));
+  var _reactNative = _$$_REQUIRE(_dependencyMap[15], "react-native");
+  var _reactNativeTcpSocket = _interopRequireDefault(_$$_REQUIRE(_dependencyMap[16], "react-native-tcp-socket"));
+  var _reactNativeUdp = _interopRequireDefault(_$$_REQUIRE(_dependencyMap[17], "react-native-udp"));
+  var _jsxRuntime = _$$_REQUIRE(_dependencyMap[18], "react/jsx-runtime");
   var _jsxFileName = "/Volumes/SHINY/Projects/PartySpeaker/App.tsx";
   function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function (e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, default: e }; if (null === e || "object" != typeof e && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t in e) "default" !== _t && {}.hasOwnProperty.call(e, _t) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t)) && (i.get || i.set) ? o(f, _t, i) : f[_t] = e[_t]); return f; })(e, t); }
   var PartyAudio = _reactNative.NativeModules.PartyAudio;
   var TCP_PORT = 5050;
   var UDP_PORT = 5051;
+  var TRANSFER_PORT = 5052;
   var START_BUFFER_MS = 5000;
   var BLUETOOTH_LATENCY_COMPENSATION_MS = 0;
   var DISCOVERY_MESSAGE = 'PARTYSPEAKER_HOST';
+  var TRANSFER_CHUNK_SIZE = 12000;
+  var TRANSFER_BATCH_SIZE = 4;
+  var TRANSFER_BATCH_PAUSE_MS = 12;
+  var TRACK_CACHE_TIMEOUT_MS = 120000;
+  var METADATA_HEAD_START_MS = 500;
+  var TRANSFER_ACK_EVERY_CHUNKS = 8;
+  var TRANSFER_ACK_TIMEOUT_MS = 8000;
   function App() {
     var _useState = (0, _react.useState)('home'),
       _useState2 = (0, _slicedToArray2.default)(_useState, 2),
@@ -100486,8 +100495,11 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       nodePlaybackDelayMs = _useState54[0],
       setNodePlaybackDelayMs = _useState54[1];
     var serverRef = (0, _react.useRef)(null);
+    var transferServerRef = (0, _react.useRef)(null);
     var clientsRef = (0, _react.useRef)([]);
+    var transferClientsRef = (0, _react.useRef)([]);
     var clientRef = (0, _react.useRef)(null);
+    var transferClientRef = (0, _react.useRef)(null);
     var udpHostRef = (0, _react.useRef)(null);
     var broadcastTimerRef = (0, _react.useRef)(null);
     var countdownTimerRef = (0, _react.useRef)(null);
@@ -100498,6 +100510,8 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     var currentlyPlayingTrackRef = (0, _react.useRef)(null);
     var transferBuffersRef = (0, _react.useRef)({});
     var cachedTracksRef = (0, _react.useRef)({});
+    var activeTransferIdsRef = (0, _react.useRef)(new Set());
+    var transferAckRef = (0, _react.useRef)({});
     (0, _react.useEffect)(() => {
       refreshHostAddress();
     }, []);
@@ -100595,34 +100609,51 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       }));
     };
     var autoSyncAndTransfer = (track, playlistSnapshot, selectedIdSnapshot) => {
+      // Control-plane messages go first so playlist/metadata updates are never
+      // trapped behind megabytes of audio data in the same TCP socket.
       setTimeout(() => {
         if (playlistSnapshot) {
           syncPlaylistSnapshotToNodes(playlistSnapshot, selectedIdSnapshot === undefined ? selectedTrackId : selectedIdSnapshot);
         } else {
           syncPlaylistToNodes();
         }
-        if (track) {
+      }, 50);
+      if (track) {
+        setTimeout(() => {
           transferSelectedTrackToNodes(track);
-        }
-      }, 100);
+        }, METADATA_HEAD_START_MS);
+      }
     };
     var addTrack = /*#__PURE__*/function () {
       var _ref2 = (0, _asyncToGenerator2.default)(function* () {
         try {
           var result = yield PartyAudio.pickAudioFile();
+          var trackName = result.name || 'Selected audio';
+          var metadata = yield _MetadataService.default.getMetadata(trackName, result.uri);
           var track = {
             id: `${Date.now()}-${Math.random()}`,
-            name: result.name || 'Selected audio',
-            uri: result.uri
+            name: trackName,
+            uri: result.uri,
+            metadata
           };
+          yield PartyAudio.registerTrackForTransfer(track.id, track.uri);
           var nextPlaylist = [...playlist, track];
           setPlaylist(nextPlaylist);
           setSelectedTrackId(track.id);
           setCurrentTrackName(track.name);
+          setCurrentTrackMetadata(metadata);
           setPlaybackState('idle');
           setTrackProgress(track.id, 0);
-          addLog(`Added track: ${track.name}`);
-          autoSyncAndTransfer(track, nextPlaylist, track.id);
+          setTransferProgress(0);
+          setTransferProgressText(`Waiting for speakers: ${track.name}`);
+          addLog(`Added track + metadata: ${track.name}`);
+
+          // Metadata/playlist goes out first on the tiny control channel.
+          syncPlaylistSnapshotToNodes(nextPlaylist, track.id);
+
+          // Give the control message a moment to render, then ask nodes to download
+          // the binary file natively. No Base64 crosses the JS bridge.
+          setTimeout(() => transferSelectedTrackToNodes(track), 150);
         } catch (error) {
           addLog(`Add track cancelled/error: ${String(error)}`);
         }
@@ -100764,6 +100795,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     var startHostServer = /*#__PURE__*/function () {
       var _ref8 = (0, _asyncToGenerator2.default)(function* () {
         yield refreshHostAddress();
+        yield PartyAudio.startTrackTransferServer(TRANSFER_PORT);
         if (serverRef.current) {
           setStatus('Host server already running');
           return;
@@ -100808,11 +100840,31 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                 if (!cachedTracksRef.current[key].includes(trackId)) {
                   cachedTracksRef.current[key].push(trackId);
                 }
-                addLog(`Node cached track: ${trackName}`);
+                var cachedCount = clientsRef.current.filter(clientSocket => {
+                  var clientKey = clientSocket.remoteAddress || 'unknown';
+                  return cachedTracksRef.current[clientKey]?.includes(trackId);
+                }).length;
+                addLog(`Node cached track: ${trackName} (${cachedCount}/${clientsRef.current.length})`);
+                if (cachedCount === clientsRef.current.length) {
+                  setTransferProgress(100);
+                  setTrackProgress(trackId, 100);
+                  setTransferProgressText(`Ready: ${trackName}`);
+                  setStatus(`Ready on all speakers: ${trackName}`);
+                } else {
+                  setTransferProgressText(`Caching ${trackName}: ${cachedCount}/${clientsRef.current.length} speakers ready`);
+                }
+              }
+              if (message.startsWith('TRACK_DOWNLOAD_FAILED|')) {
+                var _message$split = message.split('|'),
+                  _message$split2 = (0, _slicedToArray2.default)(_message$split, 3),
+                  _trackId = _message$split2[1],
+                  detail = _message$split2[2];
+                addLog(`Speaker download failed for ${_trackId}: ${detail || 'unknown error'}`);
+                setStatus('A speaker failed to download the track');
               }
               if (message.startsWith('PLAY_TRACK_SCHEDULED|')) {
-                var _trackId = message.split('|')[1];
-                addLog(`Node scheduled track playback: ${_trackId}`);
+                var _trackId2 = message.split('|')[1];
+                addLog(`Node scheduled track playback: ${_trackId2}`);
               }
             });
           });
@@ -100858,7 +100910,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           addLog('Discovery broadcast started');
           broadcastTimerRef.current = setInterval(() => {
             var message = `${DISCOVERY_MESSAGE}|${TCP_PORT}`;
-            socket.send(message, undefined, undefined, UDP_PORT, '192.168.0.255', error => {
+            socket.send(message, undefined, undefined, UDP_PORT, `${subnetPrefix}.255`, error => {
               if (error) {
                 addLog(`Discovery send error: ${String(error)}`);
               }
@@ -100959,6 +101011,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         serverRef.current.close();
         serverRef.current = null;
       }
+      PartyAudio.stopTrackTransferServer().catch(() => {});
       if (nowPlayingBroadcastTimerRef.current) {
         clearInterval(nowPlayingBroadcastTimerRef.current);
         nowPlayingBroadcastTimerRef.current = null;
@@ -101018,13 +101071,17 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       });
     };
     var waitForTrackCachedOnAllNodes = /*#__PURE__*/function () {
-      var _ref0 = (0, _asyncToGenerator2.default)(function* (track, timeoutMs = 45000) {
+      var _ref0 = (0, _asyncToGenerator2.default)(function* (track, timeoutMs = TRACK_CACHE_TIMEOUT_MS) {
         var startedAt = Date.now();
         while (!isTrackCachedOnAllNodes(track.id)) {
+          var cachedCount = clientsRef.current.filter(socket => {
+            var key = socket.remoteAddress || 'unknown';
+            return cachedTracksRef.current[key]?.includes(track.id);
+          }).length;
           if (Date.now() - startedAt > timeoutMs) {
-            throw new Error(`Timed out waiting for nodes to cache ${track.name}`);
+            throw new Error(`Timed out waiting for speakers to cache ${track.name} (${cachedCount}/${clientsRef.current.length} ready)`);
           }
-          setStatus(`Waiting for nodes to cache: ${track.name}`);
+          setStatus(`Caching ${track.name}: ${cachedCount}/${clientsRef.current.length} speakers ready`);
           yield new Promise(resolve => setTimeout(() => resolve(), 500));
         }
       });
@@ -101045,15 +101102,15 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           setStatus('No nodes connected');
           return;
         }
-        try {
-          if (!isTrackCachedOnAllNodes(selected.id)) {
-            addLog(`Selected track not cached everywhere. Transferring first: ${selected.name}`);
-            yield transferSelectedTrackToNodes(selected);
-            yield waitForTrackCachedOnAllNodes(selected);
-          }
-        } catch (error) {
-          addLog(`Cannot play yet: ${String(error)}`);
-          _reactNative.Alert.alert('Track not ready', String(error));
+        if (!isTrackCachedOnAllNodes(selected.id)) {
+          var readyCount = clientsRef.current.filter(socket => {
+            var key = socket.remoteAddress || 'unknown';
+            return cachedTracksRef.current[key]?.includes(selected.id);
+          }).length;
+          var message = `Still downloading to speakers (${readyCount}/${clientsRef.current.length} ready)`;
+          addLog(message);
+          setStatus(message);
+          _reactNative.Alert.alert('Track still downloading', message);
           return;
         }
         var targetTimeMs = Date.now() + START_BUFFER_MS;
@@ -101088,75 +101145,31 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     var transferSelectedTrackToNodes = /*#__PURE__*/function () {
       var _ref10 = (0, _asyncToGenerator2.default)(function* (trackOverride) {
         var selected = trackOverride || getSelectedTrack();
-        if (!selected) {
-          _reactNative.Alert.alert('No track selected', 'Add and select a track first.');
-          return;
-        }
-        if (clientsRef.current.length === 0) {
-          addLog('No nodes connected');
-          setStatus('No nodes connected');
-          return;
-        }
-        try {
-          var allNodesHaveTrack = clientsRef.current.every(socket => {
-            var key = socket.remoteAddress || 'unknown';
-            return cachedTracksRef.current[key]?.includes(selected.id);
-          });
-          if (clientsRef.current.length > 0 && allNodesHaveTrack) {
-            addLog(`Skipping transfer. All nodes already cached ${selected.name}`);
-            setStatus(`Already cached on all nodes`);
-            setTransferProgressText(`Cached: ${selected.name}`);
-            setTransferProgress(100);
-            setTrackProgress(selected.id, 100);
-            return;
-          }
-          setTransferProgress(0);
-          setTrackProgress(selected.id, 0);
-          setTransferProgressText(`Preparing: ${selected.name}`);
-          setStatus('Reading selected track...');
-          addLog(`Reading track for transfer: ${selected.name}`);
-          var base64 = yield PartyAudio.readAudioUriAsBase64(selected.uri);
-          var chunkSize = 24000;
-          var chunks = [];
-          for (var i = 0; i < base64.length; i += chunkSize) {
-            chunks.push(base64.slice(i, i + chunkSize));
-          }
-          var startPayload = {
-            id: selected.id,
-            name: selected.name,
-            chunks: chunks.length
-          };
-          clientsRef.current.forEach(socket => {
-            writeSocket(socket, `TRACK_TRANSFER_START|${JSON.stringify(startPayload)}`);
-          });
-          var _loop2 = function* (_i) {
-            clientsRef.current.forEach(socket => {
-              writeSocket(socket, `TRACK_TRANSFER_CHUNK|${selected.id}|${_i}|${chunks[_i]}`);
-            });
-            if (_i % 10 === 0) {
-              var percent = Math.round((_i + 1) / chunks.length * 100);
-              setTransferProgress(percent);
-              setTrackProgress(selected.id, percent);
-              setTransferProgressText(`Transferring ${selected.name}: ${percent}%`);
-              setStatus(`Transferring ${selected.name}: ${_i + 1}/${chunks.length}`);
-              yield new Promise(resolve => setTimeout(() => resolve(), 5));
-            }
-          };
-          for (var _i = 0; _i < chunks.length; _i++) {
-            yield* _loop2(_i);
-          }
-          clientsRef.current.forEach(socket => {
-            writeSocket(socket, `TRACK_TRANSFER_END|${selected.id}`);
-          });
+        if (!selected || clientsRef.current.length === 0) return;
+        var missingSockets = clientsRef.current.filter(socket => {
+          var key = socket.remoteAddress || 'unknown';
+          return !cachedTracksRef.current[key]?.includes(selected.id);
+        });
+        if (missingSockets.length === 0) {
           setTransferProgress(100);
           setTrackProgress(selected.id, 100);
-          setTransferProgressText(`Transferred: ${selected.name}`);
-          setStatus('Track transfer sent');
-          addLog(`Track transfer sent: ${selected.name} (${chunks.length} chunks)`);
-        } catch (error) {
-          addLog(`Track transfer error: ${String(error)}`);
-          _reactNative.Alert.alert('Track transfer error', String(error));
+          setTransferProgressText(`Ready: ${selected.name}`);
+          setStatus(`Ready on all speakers: ${selected.name}`);
+          return;
         }
+        yield PartyAudio.registerTrackForTransfer(selected.id, selected.uri);
+        var payload = {
+          id: selected.id,
+          name: selected.name
+        };
+        missingSockets.forEach(socket => {
+          writeSocket(socket, `DOWNLOAD_TRACK|${JSON.stringify(payload)}`);
+        });
+        setTransferProgress(1);
+        setTrackProgress(selected.id, 1);
+        setTransferProgressText(`Downloading on ${missingSockets.length} speaker(s): ${selected.name}`);
+        setStatus(`Waiting for ${missingSockets.length} speaker download(s)`);
+        addLog(`Native download requested: ${selected.name}`);
       });
       return function transferSelectedTrackToNodes(_x3) {
         return _ref10.apply(this, arguments);
@@ -101171,7 +101184,8 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       var payload = {
         tracks: tracksSnapshot.map(track => ({
           id: track.id,
-          name: track.name
+          name: track.name,
+          metadata: track.metadata
         })),
         selectedTrackId: selectedIdSnapshot
       };
@@ -101193,7 +101207,8 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       var payload = {
         tracks: playlist.map(track => ({
           id: track.id,
-          name: track.name
+          name: track.name,
+          metadata: track.metadata
         })),
         selectedTrackId
       };
@@ -101272,11 +101287,33 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }, 5000);
       });
       var handleHostMessage = /*#__PURE__*/function () {
-        var _ref11 = (0, _asyncToGenerator2.default)(function* (message) {
+        var _ref11 = (0, _asyncToGenerator2.default)(function* (message, responseSocket = clientRef.current) {
           var isTransferChunk = message.startsWith('TRACK_TRANSFER_CHUNK|');
           if (!isTransferChunk) {
             setLastMessage(message);
             addLog(`Host says: ${message}`);
+          }
+          if (message.startsWith('DOWNLOAD_TRACK|')) {
+            try {
+              var payload = JSON.parse(message.replace('DOWNLOAD_TRACK|', ''));
+              if (!payload.id || !payload.name) return;
+              setStatus(`Downloading: ${payload.name}`);
+              setTrackProgress(payload.id, 1);
+              addLog(`Native download started: ${payload.name}`);
+              yield PartyAudio.downloadTrackFromHost(ipToUse, TRANSFER_PORT, payload.id, payload.name);
+              setTrackProgress(payload.id, 100);
+              setStatus(`Track cached: ${payload.name}`);
+              addLog(`Native download complete: ${payload.name}`);
+              writeSocket(client, `TRACK_RECEIVED|${payload.id}|${payload.name}`);
+            } catch (error) {
+              setStatus('Track download failed');
+              addLog(`Native download error: ${String(error)}`);
+              try {
+                var _payload = JSON.parse(message.replace('DOWNLOAD_TRACK|', ''));
+                writeSocket(client, `TRACK_DOWNLOAD_FAILED|${_payload.id}|${String(error)}`);
+              } catch {}
+            }
+            return;
           }
           if (message.startsWith('SYNC_TIME|')) {
             var hostNow = Number(message.split('|')[1]);
@@ -101298,23 +101335,23 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           }
           if (message.startsWith('NOW_PLAYING|')) {
             try {
-              var payload = JSON.parse(message.replace('NOW_PLAYING|', ''));
-              if (payload.trackId && payload.trackName && payload.startedAtHostMs) {
+              var _payload2 = JSON.parse(message.replace('NOW_PLAYING|', ''));
+              if (_payload2.trackId && _payload2.trackName && _payload2.startedAtHostMs) {
                 nowPlayingRef.current = {
-                  trackId: payload.trackId,
-                  trackName: payload.trackName,
-                  startedAtHostMs: payload.startedAtHostMs
+                  trackId: _payload2.trackId,
+                  trackName: _payload2.trackName,
+                  startedAtHostMs: _payload2.startedAtHostMs
                 };
-                startPlaybackUiClock(payload.trackName, payload.startedAtHostMs);
-                var alreadyPlayingThisTrack = currentlyPlayingTrackRef.current === payload.trackId;
+                startPlaybackUiClock(_payload2.trackName, _payload2.startedAtHostMs);
+                var alreadyPlayingThisTrack = currentlyPlayingTrackRef.current === _payload2.trackId;
                 if (!alreadyPlayingThisTrack) {
                   var _hostNow = getNodeHostNowMs();
-                  var positionMs = _hostNow - payload.startedAtHostMs;
+                  var positionMs = _hostNow - _payload2.startedAtHostMs;
                   if (positionMs > 750) {
-                    yield playCachedTrackFromPosition(payload.trackId, payload.trackName, positionMs);
+                    yield playCachedTrackFromPosition(_payload2.trackId, _payload2.trackName, positionMs);
                   }
                 }
-                setStatus(`Now playing: ${payload.trackName}`);
+                setStatus(`Now playing: ${_payload2.trackName}`);
               }
             } catch (error) {
               addLog(`NOW_PLAYING parse error: ${String(error)}`);
@@ -101349,16 +101386,20 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           if (message.startsWith('PLAYLIST_SYNC|')) {
             try {
               var rawJson = message.replace('PLAYLIST_SYNC|', '');
-              var _payload = JSON.parse(rawJson);
-              var syncedTracks = (_payload.tracks || []).map(track => ({
+              var _payload3 = JSON.parse(rawJson);
+              var syncedTracks = (_payload3.tracks || []).map(track => ({
                 id: track.id,
                 name: track.name,
-                uri: ''
+                uri: '',
+                metadata: track.metadata
               }));
               setPlaylist(syncedTracks);
-              setSelectedTrackId(_payload.selectedTrackId || null);
-              var selected = syncedTracks.find(track => track.id === _payload.selectedTrackId);
+              setSelectedTrackId(_payload3.selectedTrackId || null);
+              var selected = syncedTracks.find(track => track.id === _payload3.selectedTrackId);
               setCurrentTrackName(selected ? selected.name : 'None');
+              if (selected?.metadata) {
+                setCurrentTrackMetadata(selected.metadata);
+              }
               writeSocket(client, 'PLAYLIST_RECEIVED');
               addLog(`Synced playlist received: ${syncedTracks.length} track(s)`);
             } catch (error) {
@@ -101367,13 +101408,13 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           }
           if (message.startsWith('TRACK_TRANSFER_START|')) {
             try {
-              var _payload2 = JSON.parse(message.replace('TRACK_TRANSFER_START|', ''));
-              transferBuffersRef.current[_payload2.id] = {
-                name: _payload2.name,
-                chunks: new Array(_payload2.chunks).fill('')
+              var _payload4 = JSON.parse(message.replace('TRACK_TRANSFER_START|', ''));
+              transferBuffersRef.current[_payload4.id] = {
+                name: _payload4.name,
+                chunks: new Array(_payload4.chunks).fill('')
               };
-              setTrackProgress(_payload2.id, 0);
-              addLog(`Receiving track: ${_payload2.name} (${_payload2.chunks} chunks)`);
+              setTrackProgress(_payload4.id, 0);
+              addLog(`Receiving track: ${_payload4.name} (${_payload4.chunks} chunks)`);
             } catch (error) {
               addLog(`Track start parse error: ${String(error)}`);
             }
@@ -101386,25 +101427,38 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
             var buffer = transferBuffersRef.current[trackId];
             if (buffer && !Number.isNaN(index)) {
               buffer.chunks[index] = chunk;
-              if (index % 10 === 0) {
-                var percent = Math.round((index + 1) / buffer.chunks.length * 100);
+              if ((index + 1) % TRANSFER_ACK_EVERY_CHUNKS === 0 || index === buffer.chunks.length - 1) {
+                if (responseSocket) {
+                  writeSocket(responseSocket, `TRANSFER_ACK|${trackId}|${index}`);
+                }
+              }
+              if (index % TRANSFER_BATCH_SIZE === 0 || index === buffer.chunks.length - 1) {
+                var percent = Math.min(99, Math.round((index + 1) / buffer.chunks.length * 100));
                 setTrackProgress(trackId, percent);
                 setStatus(`Receiving ${buffer.name}: ${percent}%`);
               }
             }
           }
           if (message.startsWith('TRACK_TRANSFER_END|')) {
-            var _trackId2 = message.split('|')[1];
-            var _buffer = transferBuffersRef.current[_trackId2];
+            var _trackId3 = message.split('|')[1];
+            var _buffer = transferBuffersRef.current[_trackId3];
             if (_buffer) {
               try {
+                var missingChunks = _buffer.chunks.reduce((missing, chunk, index) => {
+                  if (!chunk) missing.push(index);
+                  return missing;
+                }, []);
+                if (missingChunks.length > 0) {
+                  throw new Error(`Incomplete transfer: missing ${missingChunks.length} chunk(s)`);
+                }
                 var base64 = _buffer.chunks.join('');
-                yield PartyAudio.saveBase64Track(_trackId2, _buffer.name, base64);
-                delete transferBuffersRef.current[_trackId2];
+                setStatus(`Finalising ${_buffer.name}…`);
+                yield PartyAudio.saveBase64Track(_trackId3, _buffer.name, base64);
+                delete transferBuffersRef.current[_trackId3];
                 setStatus(`Track cached: ${_buffer.name}`);
-                setTrackProgress(_trackId2, 100);
+                setTrackProgress(_trackId3, 100);
                 addLog(`Track cached: ${_buffer.name}`);
-                writeSocket(client, `TRACK_RECEIVED|${_trackId2}|${_buffer.name}`);
+                writeSocket(client, `TRACK_RECEIVED|${_trackId3}|${_buffer.name}`);
               } catch (error) {
                 addLog(`Save transferred track error: ${String(error)}`);
               }
@@ -101412,28 +101466,28 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           }
           if (message.startsWith('PLAY_TRACK_AT|')) {
             try {
-              var _payload3 = JSON.parse(message.replace('PLAY_TRACK_AT|', ''));
-              if (!_payload3.id || !_payload3.name || !_payload3.targetTimeMs) {
+              var _payload5 = JSON.parse(message.replace('PLAY_TRACK_AT|', ''));
+              if (!_payload5.id || !_payload5.name || !_payload5.targetTimeMs) {
                 addLog('Ignored broken PLAY_TRACK_AT message');
                 return;
               }
               currentlyPlayingTrackRef.current = null;
               nowPlayingRef.current = {
-                trackId: _payload3.id,
-                trackName: _payload3.name,
-                startedAtHostMs: _payload3.targetTimeMs
+                trackId: _payload5.id,
+                trackName: _payload5.name,
+                startedAtHostMs: _payload5.targetTimeMs
               };
-              startPlaybackUiClock(_payload3.name, _payload3.targetTimeMs);
+              startPlaybackUiClock(_payload5.name, _payload5.targetTimeMs);
               var _hostNow2 = getNodeHostNowMs();
-              var _positionMs = _hostNow2 - _payload3.targetTimeMs;
+              var _positionMs = _hostNow2 - _payload5.targetTimeMs;
               if (_positionMs > 750) {
-                yield playCachedTrackFromPosition(_payload3.id, _payload3.name, _positionMs);
-                writeSocket(client, `PLAY_TRACK_CATCHUP|${_payload3.id}|${Math.round(_positionMs)}`);
+                yield playCachedTrackFromPosition(_payload5.id, _payload5.name, _positionMs);
+                writeSocket(client, `PLAY_TRACK_CATCHUP|${_payload5.id}|${Math.round(_positionMs)}`);
               } else {
-                playCachedTrackAt(_payload3.id, _payload3.name, _payload3.targetTimeMs);
-                writeSocket(client, `PLAY_TRACK_SCHEDULED|${_payload3.id}`);
+                playCachedTrackAt(_payload5.id, _payload5.name, _payload5.targetTimeMs);
+                writeSocket(client, `PLAY_TRACK_SCHEDULED|${_payload5.id}`);
               }
-              addLog(`Scheduled cached track from host: ${_payload3.name}`);
+              addLog(`Scheduled cached track from host: ${_payload5.name}`);
             } catch (error) {
               addLog(`PLAY_TRACK_AT parse error: ${String(error)}`);
             }
@@ -101612,7 +101666,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           children: "Party Code"
         }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
           style: {
-            color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.white,
+            color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.white,
             fontSize: 112,
             lineHeight: 116,
             fontWeight: '900',
@@ -101629,13 +101683,13 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           },
           children: [/*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.Text, {
             style: {
-              color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
+              color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.muted,
               fontSize: 16
             },
             children: ["\uD83D\uDCE1 ", hostLocalIp, ":5050"]
           }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.Text, {
             style: {
-              color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
+              color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.muted,
               fontSize: 16
             },
             children: ["\uD83D\uDC64 ", nodeCount, " ", nodeCount === 1 ? 'speaker' : 'speakers']
@@ -101650,7 +101704,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           },
           children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
             style: {
-              color: isHosting ? _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.white : _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
+              color: isHosting ? _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.white : _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.muted,
               fontSize: 15,
               fontWeight: '700',
               textAlign: 'center'
@@ -101658,7 +101712,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
             children: isHosting ? `Ready for speakers to join${nodeCount > 0 ? ` • ${nodeCount} connected` : ''}` : 'Tap Start Hosting to open the party'
           }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
             style: {
-              color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.faint,
+              color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.faint,
               fontSize: 12,
               marginTop: 6,
               textAlign: 'center'
@@ -101859,8 +101913,8 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                 fontSize: 30,
                 textAlign: 'center',
                 backgroundColor: 'rgba(255,255,255,0.055)',
-                borderColor: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.border,
-                color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.white
+                borderColor: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.border,
+                color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.white
               }],
               placeholder: "Enter party code",
               placeholderTextColor: "#777",
@@ -101873,7 +101927,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
               onPress: connectWithPartyCode
             }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
               style: {
-                color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
+                color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.muted,
                 textAlign: 'center'
               },
               children: isConnected ? 'You are connected to the party' : 'Use the code shown on the host screen'
@@ -101887,14 +101941,14 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
               children: "Speaker Status"
             }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
               style: {
-                color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.white,
+                color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.white,
                 fontSize: 34,
                 fontWeight: '900'
               },
               children: isConnected ? 'Connected' : 'Not Connected'
             }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
               style: {
-                color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
+                color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.muted,
                 marginTop: 6
               },
               children: status
@@ -101914,7 +101968,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                 children: "Playlist"
               }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.Text, {
                 style: {
-                  color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
+                  color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.muted,
                   fontWeight: '800'
                 },
                 children: [playlist.length, " ", playlist.length === 1 ? 'Track' : 'Tracks']
@@ -101922,7 +101976,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
             }), playlist.length === 0 ? /*#__PURE__*/(0, _jsxRuntime.jsx)(_PartyCard.default, {
               children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
                 style: {
-                  color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
+                  color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.muted,
                   textAlign: 'center'
                 },
                 children: "No playlist received yet"
@@ -101940,8 +101994,8 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                     borderRadius: 22,
                     paddingHorizontal: 18,
                     paddingVertical: 14,
-                    backgroundColor: selected ? _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.white : _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.card,
-                    borderColor: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.border,
+                    backgroundColor: selected ? _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.white : _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.card,
+                    borderColor: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.border,
                     borderWidth: 1,
                     flexDirection: 'row',
                     alignItems: 'center',
@@ -101953,7 +102007,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                   },
                   children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
                     style: {
-                      color: selected ? _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.black : _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.white,
+                      color: selected ? _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.black : _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.white,
                       fontSize: 24,
                       fontWeight: '900',
                       width: 28
@@ -101964,13 +102018,13 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                       width: 56,
                       height: 56,
                       borderRadius: 16,
-                      backgroundColor: selected ? 'rgba(0,0,0,0.12)' : _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.cardStrong,
+                      backgroundColor: selected ? 'rgba(0,0,0,0.12)' : _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.cardStrong,
                       justifyContent: 'center',
                       alignItems: 'center'
                     },
                     children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
                       style: {
-                        color: selected ? _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.black : _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.white,
+                        color: selected ? _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.black : _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.white,
                         fontSize: 24,
                         fontWeight: '900'
                       },
@@ -101983,7 +102037,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                     children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
                       numberOfLines: 1,
                       style: {
-                        color: selected ? _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.black : _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.white,
+                        color: selected ? _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.black : _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.white,
                         fontSize: 18,
                         fontWeight: '900'
                       },
@@ -101991,7 +102045,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                     }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
                       numberOfLines: 1,
                       style: {
-                        color: selected ? 'rgba(0,0,0,0.55)' : _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
+                        color: selected ? 'rgba(0,0,0,0.55)' : _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.muted,
                         fontSize: 14,
                         marginTop: 3
                       },
@@ -101999,7 +102053,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                     })]
                   }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
                     style: {
-                      color: selected ? _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.black : _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
+                      color: selected ? _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.black : _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.muted,
                       fontSize: 28
                     },
                     children: "\u22EE"
@@ -102027,14 +102081,14 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
               }
             }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
               style: {
-                color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
+                color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.muted,
                 textAlign: 'center',
                 marginTop: 8
               },
               children: nowPlayingText
             }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
               style: {
-                color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.faint,
+                color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.faint,
                 textAlign: 'center',
                 marginTop: 4
               },
@@ -102137,7 +102191,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }],
         children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
           style: {
-            color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.white,
+            color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.white,
             fontSize: 54,
             lineHeight: 58,
             fontWeight: '900',
@@ -102148,7 +102202,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           children: "PartySpeaker"
         }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
           style: {
-            color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.muted,
+            color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.muted,
             fontSize: 18,
             lineHeight: 26,
             textAlign: 'center',
@@ -102169,7 +102223,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           })]
         }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
           style: {
-            color: _$$_REQUIRE(_dependencyMap[18], "./src/components/ui/PartyTheme").partyTheme.faint,
+            color: _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.faint,
             fontSize: 13,
             lineHeight: 19,
             textAlign: 'center',
@@ -102449,7 +102503,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       fontWeight: '700'
     }
   });
-},610,[1,178,14,611,612,613,614,625,619,620,623,621,624,71,2,626,635,182,622],"App.tsx");
+},610,[1,178,14,611,612,613,614,625,619,620,623,621,624,615,71,2,626,635,182,622],"App.tsx");
 __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, exports, _dependencyMap) {
   var _interopRequireDefault = _$$_REQUIRE(_dependencyMap[0], "@babel/runtime/helpers/interopRequireDefault");
   Object.defineProperty(exports, "__esModule", {

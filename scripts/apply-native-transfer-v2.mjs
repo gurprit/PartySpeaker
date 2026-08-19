@@ -130,8 +130,8 @@ const nativeMethods = `
                 val tracksDir = File(reactContext.filesDir, "party_tracks")
                 if (!tracksDir.exists()) tracksDir.mkdirs()
 
-                val outputFile = File(tracksDir, "${safeTrackId}_${safeFileName}")
-                tempFile = File(tracksDir, "${safeTrackId}_${safeFileName}.part")
+                val outputFile = File(tracksDir, "\${safeTrackId}_\${safeFileName}")
+                tempFile = File(tracksDir, "\${safeTrackId}_\${safeFileName}.part")
                 if (tempFile.exists()) tempFile.delete()
 
                 Socket(host, port).use { socket ->
