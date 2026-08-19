@@ -51,6 +51,11 @@ const UDP_PORT = 5051;
 const START_BUFFER_MS = 5000;
 const BLUETOOTH_LATENCY_COMPENSATION_MS = 0;
 const DISCOVERY_MESSAGE = 'PARTYSPEAKER_HOST';
+const TRANSFER_CHUNK_SIZE = 12000;
+const TRANSFER_BATCH_SIZE = 4;
+const TRANSFER_BATCH_PAUSE_MS = 12;
+const TRACK_CACHE_TIMEOUT_MS = 120000;
+const METADATA_HEAD_START_MS = 500;
 
 
 export default function App() {
@@ -102,6 +107,7 @@ export default function App() {
   const currentlyPlayingTrackRef = useRef<string | null>(null);
   const transferBuffersRef = useRef<Record<string, {name: string; chunks: string[]}>>({});
   const cachedTracksRef = useRef<Record<string, string[]>>({});
+  const activeTransferIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     refreshHostAddress();
@@ -217,6 +223,8 @@ export default function App() {
   };
 
   const autoSyncAndTransfer = (track?: Track, playlistSnapshot?: Track[], selectedIdSnapshot?: string | null) => {
+    // Control-plane messages go first so playlist/metadata updates are never
+    // trapped behind megabytes of audio data in the same TCP socket.
     setTimeout(() => {
       if (playlistSnapshot) {
         syncPlaylistSnapshotToNodes(
@@ -226,11 +234,13 @@ export default function App() {
       } else {
         syncPlaylistToNodes();
       }
+    }, 50);
 
-      if (track) {
+    if (track) {
+      setTimeout(() => {
         transferSelectedTrackToNodes(track);
-      }
-    }, 100);
+      }, METADATA_HEAD_START_MS);
+    }
   };
 
   const addTrack = async () => {
@@ -442,7 +452,21 @@ export default function App() {
               cachedTracksRef.current[key].push(trackId);
             }
 
-            addLog(`Node cached track: ${trackName}`);
+            const cachedCount = clientsRef.current.filter(clientSocket => {
+              const clientKey = clientSocket.remoteAddress || 'unknown';
+              return cachedTracksRef.current[clientKey]?.includes(trackId);
+            }).length;
+
+            addLog(`Node cached track: ${trackName} (${cachedCount}/${clientsRef.current.length})`);
+
+            if (cachedCount === clientsRef.current.length) {
+              setTransferProgress(100);
+              setTrackProgress(trackId, 100);
+              setTransferProgressText(`Ready: ${trackName}`);
+              setStatus(`Ready on all speakers: ${trackName}`);
+            } else {
+              setTransferProgressText(`Caching ${trackName}: ${cachedCount}/${clientsRef.current.length} speakers ready`);
+            }
           }
 
           if (message.startsWith('PLAY_TRACK_SCHEDULED|')) {
@@ -499,7 +523,7 @@ export default function App() {
             undefined,
             undefined,
             UDP_PORT,
-            '192.168.0.255',
+            `${subnetPrefix}.255`,
             error => {
               if (error) {
                 addLog(`Discovery send error: ${String(error)}`);
@@ -687,15 +711,20 @@ export default function App() {
     });
   };
 
-  const waitForTrackCachedOnAllNodes = async (track: Track, timeoutMs = 45000) => {
+  const waitForTrackCachedOnAllNodes = async (track: Track, timeoutMs = TRACK_CACHE_TIMEOUT_MS) => {
     const startedAt = Date.now();
 
     while (!isTrackCachedOnAllNodes(track.id)) {
+      const cachedCount = clientsRef.current.filter(socket => {
+        const key = socket.remoteAddress || 'unknown';
+        return cachedTracksRef.current[key]?.includes(track.id);
+      }).length;
+
       if (Date.now() - startedAt > timeoutMs) {
-        throw new Error(`Timed out waiting for nodes to cache ${track.name}`);
+        throw new Error(`Timed out waiting for speakers to cache ${track.name} (${cachedCount}/${clientsRef.current.length} ready)`);
       }
 
-      setStatus(`Waiting for nodes to cache: ${track.name}`);
+      setStatus(`Caching ${track.name}: ${cachedCount}/${clientsRef.current.length} speakers ready`);
       await new Promise<void>(resolve => setTimeout(() => resolve(), 500));
     }
   };
@@ -777,22 +806,28 @@ export default function App() {
       return;
     }
 
+    if (activeTransferIdsRef.current.has(selected.id)) {
+      addLog(`Transfer already active: ${selected.name}`);
+      return;
+    }
+
+    const targetSockets = clientsRef.current.filter(socket => {
+      const key = socket.remoteAddress || 'unknown';
+      return !cachedTracksRef.current[key]?.includes(selected.id);
+    });
+
+    if (targetSockets.length === 0) {
+      addLog(`Skipping transfer. All nodes already cached ${selected.name}`);
+      setStatus('Already cached on all nodes');
+      setTransferProgressText(`Ready: ${selected.name}`);
+      setTransferProgress(100);
+      setTrackProgress(selected.id, 100);
+      return;
+    }
+
+    activeTransferIdsRef.current.add(selected.id);
+
     try {
-
-      const allNodesHaveTrack = clientsRef.current.every(socket => {
-        const key = socket.remoteAddress || 'unknown';
-        return cachedTracksRef.current[key]?.includes(selected.id);
-      });
-
-      if (clientsRef.current.length > 0 && allNodesHaveTrack) {
-        addLog(`Skipping transfer. All nodes already cached ${selected.name}`);
-        setStatus(`Already cached on all nodes`);
-        setTransferProgressText(`Cached: ${selected.name}`);
-        setTransferProgress(100);
-        setTrackProgress(selected.id, 100);
-        return;
-      }
-
       setTransferProgress(0);
       setTrackProgress(selected.id, 0);
       setTransferProgressText(`Preparing: ${selected.name}`);
@@ -800,50 +835,60 @@ export default function App() {
       addLog(`Reading track for transfer: ${selected.name}`);
 
       const base64: string = await PartyAudio.readAudioUriAsBase64(selected.uri);
-      const chunkSize = 24000;
       const chunks: string[] = [];
 
-      for (let i = 0; i < base64.length; i += chunkSize) {
-        chunks.push(base64.slice(i, i + chunkSize));
+      for (let i = 0; i < base64.length; i += TRANSFER_CHUNK_SIZE) {
+        chunks.push(base64.slice(i, i + TRANSFER_CHUNK_SIZE));
       }
 
       const startPayload = {
         id: selected.id,
         name: selected.name,
         chunks: chunks.length,
+        bytes: base64.length,
       };
 
-      clientsRef.current.forEach(socket => {
+      targetSockets.forEach(socket => {
         writeSocket(socket, `TRACK_TRANSFER_START|${JSON.stringify(startPayload)}`);
       });
 
+      // Send small batches and yield to the JS/native socket bridge. This prevents
+      // large files from starving playlist, metadata, heartbeat and playback messages.
       for (let i = 0; i < chunks.length; i++) {
-        clientsRef.current.forEach(socket => {
+        targetSockets.forEach(socket => {
           writeSocket(socket, `TRACK_TRANSFER_CHUNK|${selected.id}|${i}|${chunks[i]}`);
         });
 
-        if (i % 10 === 0) {
-          const percent = Math.round(((i + 1) / chunks.length) * 100);
+        const isBatchBoundary =
+          (i + 1) % TRANSFER_BATCH_SIZE === 0 || i === chunks.length - 1;
+
+        if (isBatchBoundary) {
+          const percent = Math.min(99, Math.round(((i + 1) / chunks.length) * 100));
           setTransferProgress(percent);
           setTrackProgress(selected.id, percent);
-          setTransferProgressText(`Transferring ${selected.name}: ${percent}%`);
-          setStatus(`Transferring ${selected.name}: ${i + 1}/${chunks.length}`);
-          await new Promise<void>(resolve => setTimeout(() => resolve(), 5));
+          setTransferProgressText(`Sending ${selected.name}: ${percent}%`);
+          setStatus(`Sending ${selected.name}: ${i + 1}/${chunks.length} chunks`);
+          await new Promise<void>(resolve => setTimeout(resolve, TRANSFER_BATCH_PAUSE_MS));
         }
       }
 
-      clientsRef.current.forEach(socket => {
+      targetSockets.forEach(socket => {
         writeSocket(socket, `TRACK_TRANSFER_END|${selected.id}`);
       });
 
-      setTransferProgress(100);
-      setTrackProgress(selected.id, 100);
-      setTransferProgressText(`Transferred: ${selected.name}`);
-      setStatus('Track transfer sent');
-      addLog(`Track transfer sent: ${selected.name} (${chunks.length} chunks)`);
+      // 100% now means confirmed cached, not merely written to the socket.
+      setTransferProgress(99);
+      setTrackProgress(selected.id, 99);
+      setTransferProgressText(`Finalising ${selected.name} on speakers…`);
+      setStatus('Waiting for speaker cache confirmations');
+      addLog(`Track data sent: ${selected.name} (${chunks.length} chunks to ${targetSockets.length} node(s))`);
     } catch (error) {
       addLog(`Track transfer error: ${String(error)}`);
+      setTransferProgressText(`Transfer failed: ${selected.name}`);
+      setStatus('Track transfer failed');
       Alert.alert('Track transfer error', String(error));
+    } finally {
+      activeTransferIdsRef.current.delete(selected.id);
     }
   };
 
@@ -1123,8 +1168,8 @@ export default function App() {
         const buffer = transferBuffersRef.current[trackId];
         if (buffer && !Number.isNaN(index)) {
           buffer.chunks[index] = chunk;
-          if (index % 10 === 0) {
-            const percent = Math.round(((index + 1) / buffer.chunks.length) * 100);
+          if (index % TRANSFER_BATCH_SIZE === 0 || index === buffer.chunks.length - 1) {
+            const percent = Math.min(99, Math.round(((index + 1) / buffer.chunks.length) * 100));
             setTrackProgress(trackId, percent);
             setStatus(`Receiving ${buffer.name}: ${percent}%`);
           }
@@ -1137,7 +1182,17 @@ export default function App() {
 
         if (buffer) {
           try {
+            const missingChunks = buffer.chunks.reduce<number[]>((missing, chunk, index) => {
+              if (!chunk) missing.push(index);
+              return missing;
+            }, []);
+
+            if (missingChunks.length > 0) {
+              throw new Error(`Incomplete transfer: missing ${missingChunks.length} chunk(s)`);
+            }
+
             const base64 = buffer.chunks.join('');
+            setStatus(`Finalising ${buffer.name}…`);
             await PartyAudio.saveBase64Track(trackId, buffer.name, base64);
             delete transferBuffersRef.current[trackId];
 
