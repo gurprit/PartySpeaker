@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Image,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -19,6 +20,7 @@ type Track = {
   id: string;
   name: string;
   uri: string;
+  metadata?: TrackMetadata;
 };
 
 type Props = {
@@ -150,9 +152,17 @@ export default function PlaylistPanel({
                 <Text style={[localStyles.trackIndex, selected ? localStyles.trackIndexSelected : null]}>{index + 1}</Text>
 
                 <View style={localStyles.trackArtworkMini}>
-                  <Text style={[localStyles.trackArtworkText, selected ? localStyles.trackArtworkTextSelected : null]}>
-                    {track.name.trim()[0]?.toUpperCase() || '♪'}
-                  </Text>
+                  {track.metadata?.artworkUri ? (
+                    <Image
+                      source={{uri: track.metadata.artworkUri}}
+                      style={localStyles.trackArtworkImage}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <Text style={[localStyles.trackArtworkText, selected ? localStyles.trackArtworkTextSelected : null]}>
+                      {track.name.trim()[0]?.toUpperCase() || '♪'}
+                    </Text>
+                  )}
                 </View>
 
                 <View style={localStyles.trackTextWrap}>
@@ -402,6 +412,11 @@ const localStyles = StyleSheet.create({
     backgroundColor: partyTheme.cardStrong,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  trackArtworkImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 12,
   },
   trackArtworkText: {
     color: partyTheme.white,
