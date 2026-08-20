@@ -100533,6 +100533,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     var cachedTracksRef = (0, _react.useRef)({});
     var nodeCachedTrackIdsRef = (0, _react.useRef)(new Set());
     var activeTransferIdsRef = (0, _react.useRef)(new Set());
+    var trackNodeProgressRef = (0, _react.useRef)({});
     var playlistRef = (0, _react.useRef)([]);
     var selectedTrackIdRef = (0, _react.useRef)(null);
     var transferAckRef = (0, _react.useRef)({});
@@ -100546,6 +100547,19 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       nodePlaybackDelayRef.current = nodePlaybackDelayMs;
     }, [nodePlaybackDelayMs]);
     (0, _react.useEffect)(() => {
+      var emitter = new _reactNative.NativeEventEmitter(PartyAudio);
+      var subscription = emitter.addListener('TrackDownloadProgress', event => {
+        var trackId = String(event?.trackId || '');
+        var percent = Math.max(1, Math.min(99, Math.round(Number(event?.percent) || 1)));
+        if (!trackId) return;
+        setTrackProgress(trackId, percent);
+        if (mode === 'node' && isSocketUsable(clientRef.current)) {
+          writeSocket(clientRef.current, `TRACK_DOWNLOAD_PROGRESS|${trackId}|${percent}`);
+        }
+      });
+      return () => subscription.remove();
+    }, [mode]);
+    (0, _react.useEffect)(() => {
       var subscription = _reactNative.AppState.addEventListener('change', nextState => {
         var previousState = appStateRef.current;
         appStateRef.current = nextState;
@@ -100555,10 +100569,8 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           activeTransferIdsRef.current.clear();
           addLog('Host resumed; waiting for speakers to reconnect before retrying transfer');
           setTimeout(() => {
-            var selected = getLatestSelectedTrack();
-            if (!selected) return;
             syncPlaylistSnapshotToNodes(playlistRef.current, selectedTrackIdRef.current);
-            _transferSelectedTrackToNodes(selected);
+            preloadPlaylistToNodes(playlistRef.current);
           }, 1500);
           return;
         }
@@ -100717,8 +100729,17 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     };
     var calibrateNodeClocksBeforePlayback = /*#__PURE__*/function () {
       var _ref3 = (0, _asyncToGenerator2.default)(function* () {
+        // Never reuse an old "best" sample. Wi-Fi scheduling and device clocks can
+        // shift while the picker/background cycle is happening. Every Play gets a
+        // fresh calibration window.
+        bestClockSampleRef.current = null;
         var liveSockets = clientsRef.current.filter(isSocketUsable);
         if (liveSockets.length === 0) return;
+
+        // The useful best-sample state lives on each node, not on the host. Reset
+        // it explicitly so every Play uses a genuinely fresh calibration window.
+        liveSockets.forEach(socket => writeSocket(socket, 'SYNC_RESET'));
+        yield new Promise(resolve => setTimeout(resolve, 80));
         addLog(`Clock calibration burst: ${CLOCK_CALIBRATION_SAMPLES} samples`);
         var _loop = function* () {
           var requestId = `${Date.now()}-${sample}-${Math.random()}`;
@@ -100770,6 +100791,14 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     var getLatestSelectedTrack = () => {
       var id = selectedTrackIdRef.current;
       return id ? playlistRef.current.find(track => track.id === id) || null : null;
+    };
+    var preloadPlaylistToNodes = (tracksSnapshot = playlistRef.current) => {
+      tracksSnapshot.forEach((track, index) => {
+        setTimeout(() => {
+          activeTransferIdsRef.current.delete(track.id);
+          _transferSelectedTrackToNodes(track);
+        }, index * 350);
+      });
     };
     var autoSyncAndTransfer = (track, playlistSnapshot, selectedIdSnapshot) => {
       // Control-plane messages go first so playlist/metadata updates are never
@@ -100971,11 +101000,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           setTimeout(() => {
             syncPlaylistSnapshotToNodes(playlistRef.current, selectedTrackIdRef.current);
             broadcastNowPlaying();
-            var selected = getLatestSelectedTrack();
-            if (selected) {
-              activeTransferIdsRef.current.delete(selected.id);
-              _transferSelectedTrackToNodes(selected);
-            }
+            preloadPlaylistToNodes(playlistRef.current);
           }, 500);
           socket.on('data', data => {
             socket._partyBuffer = `${socket._partyBuffer || ''}${data.toString()}`;
@@ -101051,50 +101076,74 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                 }
                 return;
               }
+              if (message.startsWith('TRACK_DOWNLOAD_PROGRESS|')) {
+                var _message$split = message.split('|'),
+                  _message$split2 = (0, _slicedToArray2.default)(_message$split, 3),
+                  trackId = _message$split2[1],
+                  rawPercent = _message$split2[2];
+                var percent = Math.max(1, Math.min(99, Math.round(Number(rawPercent) || 1)));
+                var _key = socket.remoteAddress || 'unknown';
+                if (!trackNodeProgressRef.current[trackId]) {
+                  trackNodeProgressRef.current[trackId] = {};
+                }
+                trackNodeProgressRef.current[trackId][_key] = percent;
+                var _liveSockets = clientsRef.current.filter(isSocketUsable);
+                var progressValues = _liveSockets.map(clientSocket => {
+                  var clientKey = clientSocket.remoteAddress || 'unknown';
+                  return cachedTracksRef.current[clientKey]?.includes(trackId) ? 100 : trackNodeProgressRef.current[trackId]?.[clientKey] || 0;
+                });
+                var overallProgress = progressValues.length > 0 ? Math.max(1, Math.min(99, Math.min(...progressValues))) : percent;
+                setTrackProgress(trackId, overallProgress);
+                if (selectedTrackIdRef.current === trackId) {
+                  setTransferProgress(overallProgress);
+                  setTransferProgressText(`Uploading to speakers: ${overallProgress}%`);
+                }
+                return;
+              }
               if (message.startsWith('TRACK_RECEIVED|')) {
                 var _parts = message.split('|');
-                var trackId = _parts[1];
+                var _trackId = _parts[1];
                 var trackName = _parts[2] || '';
-                var _key = socket.remoteAddress || 'unknown';
-                if (!cachedTracksRef.current[_key]) {
-                  cachedTracksRef.current[_key] = [];
+                var _key2 = socket.remoteAddress || 'unknown';
+                if (!cachedTracksRef.current[_key2]) {
+                  cachedTracksRef.current[_key2] = [];
                 }
-                if (!cachedTracksRef.current[_key].includes(trackId)) {
-                  cachedTracksRef.current[_key].push(trackId);
+                if (!cachedTracksRef.current[_key2].includes(_trackId)) {
+                  cachedTracksRef.current[_key2].push(_trackId);
                 }
-                var _liveSockets = clientsRef.current.filter(isSocketUsable);
-                var cachedCount = _liveSockets.filter(clientSocket => {
+                var _liveSockets2 = clientsRef.current.filter(isSocketUsable);
+                var cachedCount = _liveSockets2.filter(clientSocket => {
                   var clientKey = clientSocket.remoteAddress || 'unknown';
-                  return cachedTracksRef.current[clientKey]?.includes(trackId);
+                  return cachedTracksRef.current[clientKey]?.includes(_trackId);
                 }).length;
-                addLog(`Node cached track: ${trackName} (${cachedCount}/${_liveSockets.length})`);
-                var isSelectedTrack = selectedTrackIdRef.current === trackId;
-                if (_liveSockets.length > 0 && cachedCount === _liveSockets.length) {
-                  activeTransferIdsRef.current.delete(trackId);
-                  setTrackProgress(trackId, 100);
+                addLog(`Node cached track: ${trackName} (${cachedCount}/${_liveSockets2.length})`);
+                var isSelectedTrack = selectedTrackIdRef.current === _trackId;
+                if (_liveSockets2.length > 0 && cachedCount === _liveSockets2.length) {
+                  activeTransferIdsRef.current.delete(_trackId);
+                  setTrackProgress(_trackId, 100);
                   if (isSelectedTrack) {
                     setTransferProgress(100);
                     setTransferProgressText(`Ready: ${trackName}`);
                     setStatus(`Ready on all speakers: ${trackName}`);
                   }
                 } else if (isSelectedTrack) {
-                  setTransferProgressText(`Caching ${trackName}: ${cachedCount}/${_liveSockets.length} active speakers ready`);
+                  setTransferProgressText(`Caching ${trackName}: ${cachedCount}/${_liveSockets2.length} active speakers ready`);
                 }
               }
               if (message.startsWith('TRACK_DOWNLOAD_FAILED|')) {
-                var _message$split = message.split('|'),
-                  _message$split2 = (0, _slicedToArray2.default)(_message$split, 3),
-                  _trackId = _message$split2[1],
-                  detail = _message$split2[2];
-                activeTransferIdsRef.current.delete(_trackId);
-                addLog(`Speaker download failed for ${_trackId}: ${detail || 'unknown error'}`);
-                if (selectedTrackIdRef.current === _trackId) {
+                var _message$split3 = message.split('|'),
+                  _message$split4 = (0, _slicedToArray2.default)(_message$split3, 3),
+                  _trackId2 = _message$split4[1],
+                  detail = _message$split4[2];
+                activeTransferIdsRef.current.delete(_trackId2);
+                addLog(`Speaker download failed for ${_trackId2}: ${detail || 'unknown error'}`);
+                if (selectedTrackIdRef.current === _trackId2) {
                   setStatus('A speaker failed to download the track');
                 }
               }
               if (message.startsWith('PLAY_TRACK_SCHEDULED|')) {
-                var _trackId2 = message.split('|')[1];
-                addLog(`Node scheduled track playback: ${_trackId2}`);
+                var _trackId3 = message.split('|')[1];
+                addLog(`Node scheduled track playback: ${_trackId3}`);
               }
             });
           });
@@ -101574,15 +101623,19 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
               setTrackProgress(payload.id, 100);
               setStatus(`Track cached: ${payload.name}`);
               addLog(`Native download complete: ${payload.name}`);
-              writeSocket(client, `TRACK_RECEIVED|${payload.id}|${payload.name}`);
+              writeSocket(responseSocket || clientRef.current, `TRACK_RECEIVED|${payload.id}|${payload.name}`);
             } catch (error) {
               setStatus('Track download failed');
               addLog(`Native download error: ${String(error)}`);
               try {
                 var _payload = JSON.parse(message.replace('DOWNLOAD_TRACK|', ''));
-                writeSocket(client, `TRACK_DOWNLOAD_FAILED|${_payload.id}|${String(error)}`);
+                writeSocket(responseSocket || clientRef.current, `TRACK_DOWNLOAD_FAILED|${_payload.id}|${String(error)}`);
               } catch {}
             }
+            return;
+          }
+          if (message === 'SYNC_RESET') {
+            bestClockSampleRef.current = null;
             return;
           }
           if (message.startsWith('SYNC_REQUEST|')) {
@@ -101741,8 +101794,8 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
             }
           }
           if (message.startsWith('TRACK_TRANSFER_END|')) {
-            var _trackId3 = message.split('|')[1];
-            var _buffer = transferBuffersRef.current[_trackId3];
+            var _trackId4 = message.split('|')[1];
+            var _buffer = transferBuffersRef.current[_trackId4];
             if (_buffer) {
               try {
                 var missingChunks = _buffer.chunks.reduce((missing, chunk, index) => {
@@ -101754,12 +101807,12 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                 }
                 var base64 = _buffer.chunks.join('');
                 setStatus(`Finalising ${_buffer.name}…`);
-                yield PartyAudio.saveBase64Track(_trackId3, _buffer.name, base64);
-                delete transferBuffersRef.current[_trackId3];
+                yield PartyAudio.saveBase64Track(_trackId4, _buffer.name, base64);
+                delete transferBuffersRef.current[_trackId4];
                 setStatus(`Track cached: ${_buffer.name}`);
-                setTrackProgress(_trackId3, 100);
+                setTrackProgress(_trackId4, 100);
                 addLog(`Track cached: ${_buffer.name}`);
-                writeSocket(client, `TRACK_RECEIVED|${_trackId3}|${_buffer.name}`);
+                writeSocket(client, `TRACK_RECEIVED|${_trackId4}|${_buffer.name}`);
               } catch (error) {
                 addLog(`Save transferred track error: ${String(error)}`);
               }
@@ -102318,6 +102371,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
               },
               children: playlist.map((track, index) => {
                 var selected = selectedTrackId === track.id;
+                var progress = trackTransferStatus[track.id] || 0;
                 return /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.TouchableOpacity, {
                   activeOpacity: 0.82,
                   style: {
@@ -102349,11 +102403,21 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                       width: 56,
                       height: 56,
                       borderRadius: 16,
+                      overflow: 'hidden',
                       backgroundColor: selected ? 'rgba(0,0,0,0.12)' : _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.cardStrong,
                       justifyContent: 'center',
                       alignItems: 'center'
                     },
-                    children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+                    children: track.metadata?.artworkUri ? /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Image, {
+                      source: {
+                        uri: track.metadata.artworkUri
+                      },
+                      style: {
+                        width: '100%',
+                        height: '100%'
+                      },
+                      resizeMode: "cover"
+                    }) : /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
                       style: {
                         color: selected ? _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.black : _$$_REQUIRE(_dependencyMap[19], "./src/components/ui/PartyTheme").partyTheme.white,
                         fontSize: 24,
@@ -102380,7 +102444,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                         fontSize: 14,
                         marginTop: 3
                       },
-                      children: "Synced from host"
+                      children: progress >= 100 ? 'Cached locally' : progress > 0 ? `Downloading ${progress}%` : 'Queued from host'
                     })]
                   }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
                     style: {
@@ -103111,7 +103175,13 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
               children: index + 1
             }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.View, {
               style: localStyles.trackArtworkMini,
-              children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
+              children: track.metadata?.artworkUri ? /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Image, {
+                source: {
+                  uri: track.metadata.artworkUri
+                },
+                style: localStyles.trackArtworkImage,
+                resizeMode: "cover"
+              }) : /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
                 style: [localStyles.trackArtworkText, selected ? localStyles.trackArtworkTextSelected : null],
                 children: track.name.trim()[0]?.toUpperCase() || '♪'
               })
@@ -103352,6 +103422,11 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       backgroundColor: _$$_REQUIRE(_dependencyMap[11], "../ui/PartyTheme").partyTheme.cardStrong,
       justifyContent: 'center',
       alignItems: 'center'
+    },
+    trackArtworkImage: {
+      width: '100%',
+      height: '100%',
+      borderRadius: 12
     },
     trackArtworkText: {
       color: _$$_REQUIRE(_dependencyMap[11], "../ui/PartyTheme").partyTheme.white,

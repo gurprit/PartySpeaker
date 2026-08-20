@@ -576,6 +576,15 @@ class PartyAudioModule(
     }
 
 
+    private fun emitTrackDownloadProgress(trackId: String, percent: Int) {
+        val payload = Arguments.createMap()
+        payload.putString("trackId", trackId)
+        payload.putInt("percent", percent.coerceIn(1, 99))
+        reactContext
+            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+            .emit("TrackDownloadProgress", payload)
+    }
+
     @ReactMethod
     fun registerTrackForTransfer(trackId: String, uriString: String, promise: Promise) {
         transferTracks[trackId] = uriString
@@ -643,6 +652,14 @@ class PartyAudioModule(
                 }
 
                 output.writeInt(1)
+                val contentLength = try {
+                    reactContext.contentResolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
+                        descriptor.length
+                    } ?: -1L
+                } catch (_: Exception) {
+                    -1L
+                }
+                output.writeLong(contentLength)
                 val buffer = ByteArray(64 * 1024)
                 stream.use { source ->
                     while (true) {
@@ -693,12 +710,27 @@ class PartyAudioModule(
                         throw IllegalStateException(message)
                     }
 
+                    val totalBytes = input.readLong()
+                    var downloadedBytes = 0L
+                    var lastProgress = 0
+
                     FileOutputStream(tempFile).use { fileOutput ->
                         val buffer = ByteArray(64 * 1024)
                         while (true) {
                             val count = input.read(buffer)
                             if (count < 0) break
                             fileOutput.write(buffer, 0, count)
+                            downloadedBytes += count
+
+                            if (totalBytes > 0L) {
+                                val progress = ((downloadedBytes * 100L) / totalBytes)
+                                    .toInt()
+                                    .coerceIn(1, 99)
+                                if (progress >= lastProgress + 2 || progress >= 99) {
+                                    lastProgress = progress
+                                    emitTrackDownloadProgress(trackId, progress)
+                                }
+                            }
                         }
                         fileOutput.flush()
                     }

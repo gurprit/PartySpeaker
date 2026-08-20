@@ -15,6 +15,8 @@ import React, {useEffect, useRef, useState} from 'react';
 import {
   Alert,
   AppState,
+  Image,
+  NativeEventEmitter,
   NativeModules,
   SafeAreaView,
   Text,
@@ -136,6 +138,7 @@ export default function App() {
   const cachedTracksRef = useRef<Record<string, string[]>>({});
   const nodeCachedTrackIdsRef = useRef<Set<string>>(new Set());
   const activeTransferIdsRef = useRef<Set<string>>(new Set());
+  const trackNodeProgressRef = useRef<Record<string, Record<string, number>>>({});
   const playlistRef = useRef<Track[]>([]);
   const selectedTrackIdRef = useRef<string | null>(null);
   const transferAckRef = useRef<Record<string, number>>({});
@@ -153,6 +156,23 @@ export default function App() {
   }, [nodePlaybackDelayMs]);
 
   useEffect(() => {
+    const emitter = new NativeEventEmitter(PartyAudio);
+    const subscription = emitter.addListener('TrackDownloadProgress', (event: any) => {
+      const trackId = String(event?.trackId || '');
+      const percent = Math.max(1, Math.min(99, Math.round(Number(event?.percent) || 1)));
+      if (!trackId) return;
+
+      setTrackProgress(trackId, percent);
+
+      if (mode === 'node' && isSocketUsable(clientRef.current)) {
+        writeSocket(clientRef.current, `TRACK_DOWNLOAD_PROGRESS|${trackId}|${percent}`);
+      }
+    });
+
+    return () => subscription.remove();
+  }, [mode]);
+
+  useEffect(() => {
     const subscription = AppState.addEventListener('change', nextState => {
       const previousState = appStateRef.current;
       appStateRef.current = nextState;
@@ -164,10 +184,8 @@ export default function App() {
         addLog('Host resumed; waiting for speakers to reconnect before retrying transfer');
 
         setTimeout(() => {
-          const selected = getLatestSelectedTrack();
-          if (!selected) return;
           syncPlaylistSnapshotToNodes(playlistRef.current, selectedTrackIdRef.current);
-          transferSelectedTrackToNodes(selected);
+          preloadPlaylistToNodes(playlistRef.current);
         }, 1500);
         return;
       }
@@ -355,8 +373,17 @@ export default function App() {
   };
 
   const calibrateNodeClocksBeforePlayback = async () => {
+    // Never reuse an old "best" sample. Wi-Fi scheduling and device clocks can
+    // shift while the picker/background cycle is happening. Every Play gets a
+    // fresh calibration window.
+    bestClockSampleRef.current = null;
     const liveSockets = clientsRef.current.filter(isSocketUsable);
     if (liveSockets.length === 0) return;
+
+    // The useful best-sample state lives on each node, not on the host. Reset
+    // it explicitly so every Play uses a genuinely fresh calibration window.
+    liveSockets.forEach(socket => writeSocket(socket, 'SYNC_RESET'));
+    await new Promise<void>(resolve => setTimeout(resolve, 80));
 
     addLog(`Clock calibration burst: ${CLOCK_CALIBRATION_SAMPLES} samples`);
 
@@ -413,6 +440,15 @@ export default function App() {
   const getLatestSelectedTrack = () => {
     const id = selectedTrackIdRef.current;
     return id ? playlistRef.current.find(track => track.id === id) || null : null;
+  };
+
+  const preloadPlaylistToNodes = (tracksSnapshot = playlistRef.current) => {
+    tracksSnapshot.forEach((track, index) => {
+      setTimeout(() => {
+        activeTransferIdsRef.current.delete(track.id);
+        transferSelectedTrackToNodes(track);
+      }, index * 350);
+    });
   };
 
   const autoSyncAndTransfer = (track?: Track, playlistSnapshot?: Track[], selectedIdSnapshot?: string | null) => {
@@ -617,11 +653,7 @@ export default function App() {
         syncPlaylistSnapshotToNodes(playlistRef.current, selectedTrackIdRef.current);
         broadcastNowPlaying();
 
-        const selected = getLatestSelectedTrack();
-        if (selected) {
-          activeTransferIdsRef.current.delete(selected.id);
-          transferSelectedTrackToNodes(selected);
-        }
+        preloadPlaylistToNodes(playlistRef.current);
       }, 500);
 
       socket.on('data', data => {
@@ -714,6 +746,35 @@ export default function App() {
               }
             } catch (error) {
               addLog(`Invalid cache-state message: ${String(error)}`);
+            }
+            return;
+          }
+
+          if (message.startsWith('TRACK_DOWNLOAD_PROGRESS|')) {
+            const [, trackId, rawPercent] = message.split('|');
+            const percent = Math.max(1, Math.min(99, Math.round(Number(rawPercent) || 1)));
+            const key = socket.remoteAddress || 'unknown';
+
+            if (!trackNodeProgressRef.current[trackId]) {
+              trackNodeProgressRef.current[trackId] = {};
+            }
+            trackNodeProgressRef.current[trackId][key] = percent;
+
+            const liveSockets = clientsRef.current.filter(isSocketUsable);
+            const progressValues = liveSockets.map(clientSocket => {
+              const clientKey = clientSocket.remoteAddress || 'unknown';
+              return cachedTracksRef.current[clientKey]?.includes(trackId)
+                ? 100
+                : trackNodeProgressRef.current[trackId]?.[clientKey] || 0;
+            });
+            const overallProgress = progressValues.length > 0
+              ? Math.max(1, Math.min(99, Math.min(...progressValues)))
+              : percent;
+
+            setTrackProgress(trackId, overallProgress);
+            if (selectedTrackIdRef.current === trackId) {
+              setTransferProgress(overallProgress);
+              setTransferProgressText(`Uploading to speakers: ${overallProgress}%`);
             }
             return;
           }
@@ -1331,15 +1392,20 @@ export default function App() {
           setTrackProgress(payload.id, 100);
           setStatus(`Track cached: ${payload.name}`);
           addLog(`Native download complete: ${payload.name}`);
-          writeSocket(client, `TRACK_RECEIVED|${payload.id}|${payload.name}`);
+          writeSocket(responseSocket || clientRef.current, `TRACK_RECEIVED|${payload.id}|${payload.name}`);
         } catch (error) {
           setStatus('Track download failed');
           addLog(`Native download error: ${String(error)}`);
           try {
             const payload = JSON.parse(message.replace('DOWNLOAD_TRACK|', ''));
-            writeSocket(client, `TRACK_DOWNLOAD_FAILED|${payload.id}|${String(error)}`);
+            writeSocket(responseSocket || clientRef.current, `TRACK_DOWNLOAD_FAILED|${payload.id}|${String(error)}`);
           } catch {}
         }
+        return;
+      }
+
+      if (message === 'SYNC_RESET') {
+        bestClockSampleRef.current = null;
         return;
       }
 
@@ -2111,6 +2177,7 @@ export default function App() {
               <View style={{gap: 10}}>
                 {playlist.map((track, index) => {
                   const selected = selectedTrackId === track.id;
+                  const progress = trackTransferStatus[track.id] || 0;
 
                   return (
                     <TouchableOpacity
@@ -2145,17 +2212,26 @@ export default function App() {
                         width: 56,
                         height: 56,
                         borderRadius: 16,
+                        overflow: 'hidden',
                         backgroundColor: selected ? 'rgba(0,0,0,0.12)' : partyTheme.cardStrong,
                         justifyContent: 'center',
                         alignItems: 'center',
                       }}>
-                        <Text style={{
-                          color: selected ? partyTheme.black : partyTheme.white,
-                          fontSize: 24,
-                          fontWeight: '900',
-                        }}>
-                          {track.name.trim()[0]?.toUpperCase() || '♪'}
-                        </Text>
+                        {track.metadata?.artworkUri ? (
+                          <Image
+                            source={{uri: track.metadata.artworkUri}}
+                            style={{width: '100%', height: '100%'}}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <Text style={{
+                            color: selected ? partyTheme.black : partyTheme.white,
+                            fontSize: 24,
+                            fontWeight: '900',
+                          }}>
+                            {track.name.trim()[0]?.toUpperCase() || '♪'}
+                          </Text>
+                        )}
                       </View>
 
                       <View style={{flex: 1}}>
@@ -2176,7 +2252,11 @@ export default function App() {
                             fontSize: 14,
                             marginTop: 3,
                           }}>
-                          Synced from host
+                          {progress >= 100
+                            ? 'Cached locally'
+                            : progress > 0
+                              ? `Downloading ${progress}%`
+                              : 'Queued from host'}
                         </Text>
                       </View>
 
