@@ -100374,6 +100374,9 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
   var TRANSFER_BATCH_SIZE = 4;
   var TRANSFER_BATCH_PAUSE_MS = 12;
   var TRACK_CACHE_TIMEOUT_MS = 120000;
+  var DRIFT_CHECK_INTERVAL_MS = 1500;
+  var DRIFT_HARD_RESYNC_MS = 350;
+  var DRIFT_LOG_THRESHOLD_MS = 150;
   var METADATA_HEAD_START_MS = 500;
   var TRANSFER_ACK_EVERY_CHUNKS = 8;
   var TRANSFER_ACK_TIMEOUT_MS = 8000;
@@ -100506,16 +100509,58 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     var playbackUiTimerRef = (0, _react.useRef)(null);
     var nowPlayingBroadcastTimerRef = (0, _react.useRef)(null);
     var nodeHeartbeatTimerRef = (0, _react.useRef)(null);
+    var nodeDriftTimerRef = (0, _react.useRef)(null);
+    var nodeReconnectTimerRef = (0, _react.useRef)(null);
+    var nodeReconnectAttemptRef = (0, _react.useRef)(0);
+    var nodeReconnectScheduledRef = (0, _react.useRef)(false);
+    var nodeManualDisconnectRef = (0, _react.useRef)(false);
+    var lastHostIpRef = (0, _react.useRef)(null);
+    var appStateRef = (0, _react.useRef)(_reactNative.AppState.currentState);
     var nowPlayingRef = (0, _react.useRef)(null);
     var currentlyPlayingTrackRef = (0, _react.useRef)(null);
     var transferBuffersRef = (0, _react.useRef)({});
     var cachedTracksRef = (0, _react.useRef)({});
     var nodeCachedTrackIdsRef = (0, _react.useRef)(new Set());
     var activeTransferIdsRef = (0, _react.useRef)(new Set());
+    var playlistRef = (0, _react.useRef)([]);
+    var selectedTrackIdRef = (0, _react.useRef)(null);
     var transferAckRef = (0, _react.useRef)({});
     (0, _react.useEffect)(() => {
       refreshHostAddress();
     }, []);
+    (0, _react.useEffect)(() => {
+      var subscription = _reactNative.AppState.addEventListener('change', nextState => {
+        var previousState = appStateRef.current;
+        appStateRef.current = nextState;
+        if (mode === 'host' && (previousState === 'background' || previousState === 'inactive') && nextState === 'active') {
+          clientsRef.current = clientsRef.current.filter(isSocketUsable);
+          setNodeCount(clientsRef.current.length);
+          activeTransferIdsRef.current.clear();
+          addLog('Host resumed; waiting for speakers to reconnect before retrying transfer');
+          setTimeout(() => {
+            var selected = getLatestSelectedTrack();
+            if (!selected) return;
+            syncPlaylistSnapshotToNodes(playlistRef.current, selectedTrackIdRef.current);
+            _transferSelectedTrackToNodes(selected);
+          }, 1500);
+          return;
+        }
+        if (mode !== 'node') return;
+        if ((previousState === 'background' || previousState === 'inactive') && nextState === 'active') {
+          addLog('Node returned to foreground; requesting live resync');
+          stopNodeDriftMonitor();
+          currentlyPlayingTrackRef.current = null;
+          if (isSocketUsable(clientRef.current)) {
+            writeSocket(clientRef.current, 'NODE_RESUMED');
+            writeSocket(clientRef.current, `NODE_CACHE_STATE|${JSON.stringify(Array.from(nodeCachedTrackIdsRef.current))}`);
+          }
+        }
+        if (nextState === 'background' || nextState === 'inactive') {
+          addLog('Node moved to background');
+        }
+      });
+      return () => subscription.remove();
+    }, [mode]);
     var addLog = message => {
       var time = new Date().toLocaleTimeString();
       setLog(previous => [`${time}  ${message}`, ...previous].slice(0, 14));
@@ -100597,11 +100642,40 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         setPlaybackPositionText(formatMs(positionMs));
       }, 500);
     };
+    var stopNodeDriftMonitor = () => {
+      if (nodeDriftTimerRef.current) {
+        clearInterval(nodeDriftTimerRef.current);
+        nodeDriftTimerRef.current = null;
+      }
+    };
+    var startNodeDriftMonitor = () => {
+      stopNodeDriftMonitor();
+      nodeDriftTimerRef.current = setInterval(/*#__PURE__*/(0, _asyncToGenerator2.default)(function* () {
+        if (mode !== 'node' || appStateRef.current !== 'active') return;
+        if (!nowPlayingRef.current || !currentlyPlayingTrackRef.current) return;
+        try {
+          var actualPosition = Number(yield PartyAudio.getCurrentPlaybackPosition());
+          if (!Number.isFinite(actualPosition) || actualPosition < 0) return;
+          var expectedPosition = Math.max(0, getNodeHostNowMs() - nowPlayingRef.current.startedAtHostMs + getPlaybackDelayCompensationMs());
+          var driftMs = actualPosition - expectedPosition;
+          if (Math.abs(driftMs) >= DRIFT_LOG_THRESHOLD_MS) {
+            addLog(`Playback drift: ${Math.round(driftMs)}ms`);
+          }
+          if (Math.abs(driftMs) >= DRIFT_HARD_RESYNC_MS) {
+            yield PartyAudio.seekCurrentPlayback(expectedPosition);
+            addLog(`Playback resynced by ${Math.round(-driftMs)}ms`);
+          }
+        } catch (error) {
+          addLog(`Drift check skipped: ${String(error)}`);
+        }
+      }), DRIFT_CHECK_INTERVAL_MS);
+    };
     var stopPlaybackUiClock = () => {
       if (playbackUiTimerRef.current) {
         clearInterval(playbackUiTimerRef.current);
         playbackUiTimerRef.current = null;
       }
+      stopNodeDriftMonitor();
       currentlyPlayingTrackRef.current = null;
       setPlaybackPositionText('0:00');
       setNowPlayingText('Nothing playing');
@@ -100633,6 +100707,16 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         [trackId]: Math.max(0, Math.min(100, percent))
       }));
     };
+    (0, _react.useEffect)(() => {
+      playlistRef.current = playlist;
+    }, [playlist]);
+    (0, _react.useEffect)(() => {
+      selectedTrackIdRef.current = selectedTrackId;
+    }, [selectedTrackId]);
+    var getLatestSelectedTrack = () => {
+      var id = selectedTrackIdRef.current;
+      return id ? playlistRef.current.find(track => track.id === id) || null : null;
+    };
     var autoSyncAndTransfer = (track, playlistSnapshot, selectedIdSnapshot) => {
       // Control-plane messages go first so playlist/metadata updates are never
       // trapped behind megabytes of audio data in the same TCP socket.
@@ -100645,12 +100729,12 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       }, 50);
       if (track) {
         setTimeout(() => {
-          transferSelectedTrackToNodes(track);
+          _transferSelectedTrackToNodes(track);
         }, METADATA_HEAD_START_MS);
       }
     };
     var addTrack = /*#__PURE__*/function () {
-      var _ref2 = (0, _asyncToGenerator2.default)(function* () {
+      var _ref3 = (0, _asyncToGenerator2.default)(function* () {
         try {
           var result = yield PartyAudio.pickAudioFile();
           var trackName = result.name || 'Selected audio';
@@ -100662,7 +100746,9 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
             metadata
           };
           yield PartyAudio.registerTrackForTransfer(track.id, track.uri);
-          var nextPlaylist = [...playlist, track];
+          var nextPlaylist = [...playlistRef.current, track];
+          playlistRef.current = nextPlaylist;
+          selectedTrackIdRef.current = track.id;
           setPlaylist(nextPlaylist);
           setSelectedTrackId(track.id);
           setCurrentTrackName(track.name);
@@ -100678,13 +100764,13 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
 
           // Give the control message a moment to render, then ask nodes to download
           // the binary file natively. No Base64 crosses the JS bridge.
-          setTimeout(() => transferSelectedTrackToNodes(track), 150);
+          setTimeout(() => _transferSelectedTrackToNodes(track), 150);
         } catch (error) {
           addLog(`Add track cancelled/error: ${String(error)}`);
         }
       });
       return function addTrack() {
-        return _ref2.apply(this, arguments);
+        return _ref3.apply(this, arguments);
       };
     }();
     var removeSelectedTrack = () => {
@@ -100717,7 +100803,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       }, 100);
     };
     var playSelectedTrackLocal = /*#__PURE__*/function () {
-      var _ref3 = (0, _asyncToGenerator2.default)(function* () {
+      var _ref4 = (0, _asyncToGenerator2.default)(function* () {
         var selected = getSelectedTrack();
         if (!selected) {
           _reactNative.Alert.alert('No track selected', 'Add and select a track first.');
@@ -100733,11 +100819,11 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
       });
       return function playSelectedTrackLocal() {
-        return _ref3.apply(this, arguments);
+        return _ref4.apply(this, arguments);
       };
     }();
     var stopSelectedTrackLocal = /*#__PURE__*/function () {
-      var _ref4 = (0, _asyncToGenerator2.default)(function* () {
+      var _ref5 = (0, _asyncToGenerator2.default)(function* () {
         try {
           yield PartyAudio.stopAudioUri();
           addLog('Stopped local track');
@@ -100746,11 +100832,11 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
       });
       return function stopSelectedTrackLocal() {
-        return _ref4.apply(this, arguments);
+        return _ref5.apply(this, arguments);
       };
     }();
     var playLocalBeep = /*#__PURE__*/function () {
-      var _ref5 = (0, _asyncToGenerator2.default)(function* () {
+      var _ref6 = (0, _asyncToGenerator2.default)(function* () {
         try {
           yield PartyAudio.playBeep();
           addLog('Played local beep');
@@ -100760,11 +100846,11 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
       });
       return function playLocalBeep() {
-        return _ref5.apply(this, arguments);
+        return _ref6.apply(this, arguments);
       };
     }();
     var playLocalTestTone = /*#__PURE__*/function () {
-      var _ref6 = (0, _asyncToGenerator2.default)(function* () {
+      var _ref7 = (0, _asyncToGenerator2.default)(function* () {
         try {
           yield PartyAudio.playTestTone();
           addLog('Played local test tone');
@@ -100774,11 +100860,11 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
       });
       return function playLocalTestTone() {
-        return _ref6.apply(this, arguments);
+        return _ref7.apply(this, arguments);
       };
     }();
     var playLocalPartyClip = /*#__PURE__*/function () {
-      var _ref7 = (0, _asyncToGenerator2.default)(function* () {
+      var _ref8 = (0, _asyncToGenerator2.default)(function* () {
         try {
           yield PartyAudio.playPartyClip();
           addLog('Played local party clip');
@@ -100788,7 +100874,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
       });
       return function playLocalPartyClip() {
-        return _ref7.apply(this, arguments);
+        return _ref8.apply(this, arguments);
       };
     }();
     var playPartyClipAt = targetTimeMs => {
@@ -100818,7 +100904,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       }, delay);
     };
     var startHostServer = /*#__PURE__*/function () {
-      var _ref8 = (0, _asyncToGenerator2.default)(function* () {
+      var _ref9 = (0, _asyncToGenerator2.default)(function* () {
         yield refreshHostAddress();
         yield PartyAudio.startTrackTransferServer(TRANSFER_PORT);
         if (serverRef.current) {
@@ -100833,9 +100919,14 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           writeSocket(socket, 'WELCOME_FROM_HOST');
           sendTimeSyncToNode(socket);
           setTimeout(() => {
-            syncPlaylistSnapshotToNodes(playlist, selectedTrackId);
+            syncPlaylistSnapshotToNodes(playlistRef.current, selectedTrackIdRef.current);
             broadcastNowPlaying();
-          }, 300);
+            var selected = getLatestSelectedTrack();
+            if (selected) {
+              activeTransferIdsRef.current.delete(selected.id);
+              _transferSelectedTrackToNodes(selected);
+            }
+          }, 500);
           socket.on('data', data => {
             socket._partyBuffer = `${socket._partyBuffer || ''}${data.toString()}`;
             var lines = (socket._partyBuffer || '').split('\n');
@@ -100854,13 +100945,33 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                 setPlaylistSyncedNodeCount(previous => previous + 1);
                 addLog('Node confirmed playlist sync');
               }
+              if (message === 'NODE_RESUMED') {
+                addLog('Speaker resumed; sending fresh clock + playback state');
+                sendTimeSyncToNode(socket);
+                var playlistPayload = {
+                  tracks: playlistRef.current.map(track => ({
+                    id: track.id,
+                    name: track.name,
+                    metadata: track.metadata
+                  })),
+                  selectedTrackId: selectedTrackIdRef.current
+                };
+                writeSocket(socket, `PLAYLIST_SYNC|${JSON.stringify(playlistPayload)}`);
+                if (nowPlayingRef.current) {
+                  writeSocket(socket, `NOW_PLAYING|${JSON.stringify({
+                    ...nowPlayingRef.current,
+                    hostNowMs: Date.now()
+                  })}`);
+                }
+                return;
+              }
               if (message.startsWith('NODE_CACHE_STATE|')) {
                 try {
                   var cachedIds = JSON.parse(message.replace('NODE_CACHE_STATE|', ''));
                   var key = socket.remoteAddress || 'unknown';
                   cachedTracksRef.current[key] = Array.isArray(cachedIds) ? cachedIds : [];
                   addLog(`Speaker cache restored: ${cachedTracksRef.current[key].length} track(s)`);
-                  var selected = getSelectedTrack();
+                  var selected = getLatestSelectedTrack();
                   if (selected) {
                     var liveSockets = clientsRef.current.filter(isSocketUsable);
                     var readyCount = liveSockets.filter(clientSocket => {
@@ -100890,18 +101001,23 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                 if (!cachedTracksRef.current[_key].includes(trackId)) {
                   cachedTracksRef.current[_key].push(trackId);
                 }
-                var cachedCount = clientsRef.current.filter(clientSocket => {
+                var _liveSockets = clientsRef.current.filter(isSocketUsable);
+                var cachedCount = _liveSockets.filter(clientSocket => {
                   var clientKey = clientSocket.remoteAddress || 'unknown';
                   return cachedTracksRef.current[clientKey]?.includes(trackId);
                 }).length;
-                addLog(`Node cached track: ${trackName} (${cachedCount}/${clientsRef.current.length})`);
-                if (cachedCount === clientsRef.current.length) {
-                  setTransferProgress(100);
+                addLog(`Node cached track: ${trackName} (${cachedCount}/${_liveSockets.length})`);
+                var isSelectedTrack = selectedTrackIdRef.current === trackId;
+                if (_liveSockets.length > 0 && cachedCount === _liveSockets.length) {
+                  activeTransferIdsRef.current.delete(trackId);
                   setTrackProgress(trackId, 100);
-                  setTransferProgressText(`Ready: ${trackName}`);
-                  setStatus(`Ready on all speakers: ${trackName}`);
-                } else {
-                  setTransferProgressText(`Caching ${trackName}: ${cachedCount}/${clientsRef.current.length} speakers ready`);
+                  if (isSelectedTrack) {
+                    setTransferProgress(100);
+                    setTransferProgressText(`Ready: ${trackName}`);
+                    setStatus(`Ready on all speakers: ${trackName}`);
+                  }
+                } else if (isSelectedTrack) {
+                  setTransferProgressText(`Caching ${trackName}: ${cachedCount}/${_liveSockets.length} active speakers ready`);
                 }
               }
               if (message.startsWith('TRACK_DOWNLOAD_FAILED|')) {
@@ -100909,8 +101025,11 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                   _message$split2 = (0, _slicedToArray2.default)(_message$split, 3),
                   _trackId = _message$split2[1],
                   detail = _message$split2[2];
+                activeTransferIdsRef.current.delete(_trackId);
                 addLog(`Speaker download failed for ${_trackId}: ${detail || 'unknown error'}`);
-                setStatus('A speaker failed to download the track');
+                if (selectedTrackIdRef.current === _trackId) {
+                  setStatus('A speaker failed to download the track');
+                }
               }
               if (message.startsWith('PLAY_TRACK_SCHEDULED|')) {
                 var _trackId2 = message.split('|')[1];
@@ -100919,6 +101038,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
             });
           });
           socket.on('close', () => {
+            activeTransferIdsRef.current.clear();
             clientsRef.current = clientsRef.current.filter(item => item !== socket);
             setNodeCount(clientsRef.current.length);
             setStatus('Node disconnected');
@@ -100945,7 +101065,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         serverRef.current = server;
       });
       return function startHostServer() {
-        return _ref8.apply(this, arguments);
+        return _ref9.apply(this, arguments);
       };
     }();
     var startDiscoveryBroadcast = () => {
@@ -100988,7 +101108,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       addLog('Discovery broadcast stopped');
     };
     var scanSubnetForHost = /*#__PURE__*/function () {
-      var _ref9 = (0, _asyncToGenerator2.default)(function* () {
+      var _ref0 = (0, _asyncToGenerator2.default)(function* () {
         if (isScanning) {
           return;
         }
@@ -101050,7 +101170,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         setIsScanning(false);
       });
       return function scanSubnetForHost() {
-        return _ref9.apply(this, arguments);
+        return _ref0.apply(this, arguments);
       };
     }();
     var stopHostServer = () => {
@@ -101113,16 +101233,17 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       }, 1000);
     };
     var isTrackCachedOnAllNodes = trackId => {
-      if (clientsRef.current.length === 0) {
+      var liveSockets = clientsRef.current.filter(isSocketUsable);
+      if (liveSockets.length === 0) {
         return false;
       }
-      return clientsRef.current.every(socket => {
+      return liveSockets.every(socket => {
         var key = socket.remoteAddress || 'unknown';
         return cachedTracksRef.current[key]?.includes(trackId);
       });
     };
     var waitForTrackCachedOnAllNodes = /*#__PURE__*/function () {
-      var _ref0 = (0, _asyncToGenerator2.default)(function* (track, timeoutMs = TRACK_CACHE_TIMEOUT_MS) {
+      var _ref1 = (0, _asyncToGenerator2.default)(function* (track, timeoutMs = TRACK_CACHE_TIMEOUT_MS) {
         var startedAt = Date.now();
         while (!isTrackCachedOnAllNodes(track.id)) {
           var cachedCount = clientsRef.current.filter(socket => {
@@ -101137,11 +101258,11 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
       });
       return function waitForTrackCachedOnAllNodes(_x) {
-        return _ref0.apply(this, arguments);
+        return _ref1.apply(this, arguments);
       };
     }();
     var playSelectedTrackOnAllSpeakers = /*#__PURE__*/function () {
-      var _ref1 = (0, _asyncToGenerator2.default)(function* (trackOverride) {
+      var _ref10 = (0, _asyncToGenerator2.default)(function* (trackOverride) {
         var looksLikeTrack = trackOverride && typeof trackOverride === 'object' && typeof trackOverride.id === 'string' && typeof trackOverride.name === 'string';
         var selected = looksLikeTrack ? trackOverride : getSelectedTrack();
         if (!selected) {
@@ -101190,40 +101311,60 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         setStatus(`Playing on all speakers in ${Math.round(START_BUFFER_MS / 1000)}s`);
       });
       return function playSelectedTrackOnAllSpeakers(_x2) {
-        return _ref1.apply(this, arguments);
+        return _ref10.apply(this, arguments);
       };
     }();
-    var transferSelectedTrackToNodes = /*#__PURE__*/function () {
-      var _ref10 = (0, _asyncToGenerator2.default)(function* (trackOverride) {
-        var selected = trackOverride || getSelectedTrack();
+    var _transferSelectedTrackToNodes = /*#__PURE__*/function () {
+      var _ref11 = (0, _asyncToGenerator2.default)(function* (trackOverride) {
+        var selected = trackOverride || getLatestSelectedTrack();
         if (!selected || clientsRef.current.length === 0) return;
-        var missingSockets = clientsRef.current.filter(socket => {
+        var liveSockets = clientsRef.current.filter(isSocketUsable);
+        var missingSockets = liveSockets.filter(socket => {
           var key = socket.remoteAddress || 'unknown';
           return !cachedTracksRef.current[key]?.includes(selected.id);
         });
         if (missingSockets.length === 0) {
-          setTransferProgress(100);
+          activeTransferIdsRef.current.delete(selected.id);
           setTrackProgress(selected.id, 100);
-          setTransferProgressText(`Ready: ${selected.name}`);
-          setStatus(`Ready on all speakers: ${selected.name}`);
+          if (selectedTrackIdRef.current === selected.id) {
+            setTransferProgress(100);
+            setTransferProgressText(`Ready: ${selected.name}`);
+            setStatus(`Ready on all speakers: ${selected.name}`);
+          }
           return;
         }
+        if (activeTransferIdsRef.current.has(selected.id)) {
+          addLog(`Transfer already active: ${selected.name}`);
+          return;
+        }
+        activeTransferIdsRef.current.add(selected.id);
         yield PartyAudio.registerTrackForTransfer(selected.id, selected.uri);
         var payload = {
           id: selected.id,
           name: selected.name
         };
+        var successfulWrites = 0;
         missingSockets.forEach(socket => {
-          writeSocket(socket, `DOWNLOAD_TRACK|${JSON.stringify(payload)}`);
+          if (writeSocket(socket, `DOWNLOAD_TRACK|${JSON.stringify(payload)}`)) {
+            successfulWrites += 1;
+          }
         });
-        setTransferProgress(1);
+        if (successfulWrites === 0) {
+          activeTransferIdsRef.current.delete(selected.id);
+          addLog(`Download command could not reach any speaker; retrying ${selected.name}`);
+          setTimeout(() => _transferSelectedTrackToNodes(selected), 1500);
+          return;
+        }
         setTrackProgress(selected.id, 1);
-        setTransferProgressText(`Downloading on ${missingSockets.length} speaker(s): ${selected.name}`);
-        setStatus(`Waiting for ${missingSockets.length} speaker download(s)`);
+        if (selectedTrackIdRef.current === selected.id) {
+          setTransferProgress(1);
+          setTransferProgressText(`Downloading on ${missingSockets.length} speaker(s): ${selected.name}`);
+          setStatus(`Waiting for ${missingSockets.length} speaker download(s)`);
+        }
         addLog(`Native download requested: ${selected.name}`);
       });
       return function transferSelectedTrackToNodes(_x3) {
-        return _ref10.apply(this, arguments);
+        return _ref11.apply(this, arguments);
       };
     }();
     var syncPlaylistSnapshotToNodes = (tracksSnapshot, selectedIdSnapshot) => {
@@ -101308,6 +101449,13 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     };
     var connectToHost = ipOverride => {
       var ipToUse = ipOverride || hostIp;
+      lastHostIpRef.current = ipToUse;
+      nodeManualDisconnectRef.current = false;
+      nodeReconnectScheduledRef.current = false;
+      if (nodeReconnectTimerRef.current) {
+        clearTimeout(nodeReconnectTimerRef.current);
+        nodeReconnectTimerRef.current = null;
+      }
       if (clientRef.current) {
         addLog('Closing stale connection before reconnecting');
         try {
@@ -101321,6 +101469,8 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         host: ipToUse,
         port: TCP_PORT
       }, () => {
+        nodeReconnectAttemptRef.current = 0;
+        nodeReconnectScheduledRef.current = false;
         setStatus('Node connected');
         addLog('Connected to host');
         writeSocket(client, 'NODE_CONNECTED');
@@ -101330,16 +101480,18 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
         nodeHeartbeatTimerRef.current = setInterval(() => {
           if (clientRef.current) {
-            try {
-              writeSocket(clientRef.current, "I'M_ALIVE");
-            } catch (error) {
-              addLog(`Heartbeat failed: ${String(error)}`);
+            var sent = writeSocket(clientRef.current, "I'M_ALIVE");
+            if (!sent) {
+              addLog('Heartbeat detected a dead connection');
+              try {
+                clientRef.current?.destroy();
+              } catch {}
             }
           }
         }, 5000);
       });
       var handleHostMessage = /*#__PURE__*/function () {
-        var _ref11 = (0, _asyncToGenerator2.default)(function* (message, responseSocket = clientRef.current) {
+        var _ref12 = (0, _asyncToGenerator2.default)(function* (message, responseSocket = clientRef.current) {
           var isTransferChunk = message.startsWith('TRACK_TRANSFER_CHUNK|');
           if (!isTransferChunk) {
             setLastMessage(message);
@@ -101555,7 +101707,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           }
         });
         return function handleHostMessage(_x4) {
-          return _ref11.apply(this, arguments);
+          return _ref12.apply(this, arguments);
         };
       }();
       client.on('data', data => {
@@ -101568,26 +101720,53 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           }
         });
       });
+      var scheduleReconnect = reason => {
+        if (nodeManualDisconnectRef.current || nodeReconnectScheduledRef.current) return;
+        var ip = lastHostIpRef.current;
+        if (!ip) return;
+        nodeReconnectScheduledRef.current = true;
+        var attempt = nodeReconnectAttemptRef.current + 1;
+        nodeReconnectAttemptRef.current = attempt;
+        var delay = Math.min(10000, 1000 * Math.pow(2, Math.min(attempt - 1, 3)));
+        setStatus(`Connection lost. Reconnecting in ${Math.round(delay / 1000)}s…`);
+        addLog(`Connection lost (${reason}); reconnect attempt ${attempt} in ${delay}ms`);
+        nodeReconnectTimerRef.current = setTimeout(() => {
+          nodeReconnectTimerRef.current = null;
+          nodeReconnectScheduledRef.current = false;
+          connectToHost(ip);
+        }, delay);
+      };
       client.on('error', error => {
-        setStatus(`Connection error: ${String(error)}`);
-        _reactNative.Alert.alert('Connection error', String(error));
+        addLog(`Connection error: ${String(error)}`);
         if (nodeHeartbeatTimerRef.current) {
           clearInterval(nodeHeartbeatTimerRef.current);
           nodeHeartbeatTimerRef.current = null;
         }
-        clientRef.current = null;
+        if (clientRef.current === client) clientRef.current = null;
+        scheduleReconnect(String(error));
       });
       client.on('close', () => {
         if (nodeHeartbeatTimerRef.current) {
           clearInterval(nodeHeartbeatTimerRef.current);
           nodeHeartbeatTimerRef.current = null;
         }
-        setStatus('Connection closed');
-        clientRef.current = null;
+        if (clientRef.current === client) clientRef.current = null;
+        if (!nodeManualDisconnectRef.current) {
+          scheduleReconnect('socket closed');
+        } else {
+          setStatus('Disconnected from host');
+        }
       });
       clientRef.current = client;
     };
     var disconnectFromHost = () => {
+      nodeManualDisconnectRef.current = true;
+      nodeReconnectScheduledRef.current = false;
+      nodeReconnectAttemptRef.current = 0;
+      if (nodeReconnectTimerRef.current) {
+        clearTimeout(nodeReconnectTimerRef.current);
+        nodeReconnectTimerRef.current = null;
+      }
       if (clientRef.current) {
         clientRef.current.destroy();
         clientRef.current = null;
@@ -101608,11 +101787,12 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       addLog("Sent I'M_ALIVE to host");
     };
     var playCachedTrackFromPosition = /*#__PURE__*/function () {
-      var _ref12 = (0, _asyncToGenerator2.default)(function* (trackId, trackName, positionMs) {
+      var _ref13 = (0, _asyncToGenerator2.default)(function* (trackId, trackName, positionMs) {
         try {
           var safePosition = Math.max(0, positionMs + getPlaybackDelayCompensationMs());
           yield PartyAudio.playCachedTrackFrom(trackId, trackName, safePosition);
           currentlyPlayingTrackRef.current = trackId;
+          startNodeDriftMonitor();
           addLog(`Catch-up playing ${trackName} from ${formatMs(safePosition)}`);
           setStatus(`Playing: ${trackName}`);
           setNowPlayingText(trackName);
@@ -101622,7 +101802,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
       });
       return function playCachedTrackFromPosition(_x5, _x6, _x7) {
-        return _ref12.apply(this, arguments);
+        return _ref13.apply(this, arguments);
       };
     }();
     var playCachedTrackAt = (trackId, trackName, targetTimeMs) => {
@@ -101652,6 +101832,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         try {
           yield PartyAudio.playCachedTrack(trackId, trackName);
           currentlyPlayingTrackRef.current = trackId;
+          startNodeDriftMonitor();
           addLog(`Playing scheduled cached track: ${trackName}`);
           setStatus(`Playing: ${trackName}`);
         } catch (error) {
@@ -101661,7 +101842,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       }), delay);
     };
     var playCachedSelectedTrack = /*#__PURE__*/function () {
-      var _ref14 = (0, _asyncToGenerator2.default)(function* () {
+      var _ref15 = (0, _asyncToGenerator2.default)(function* () {
         var selected = getSelectedTrack();
         if (!selected) {
           _reactNative.Alert.alert('No cached track selected', 'Sync the playlist and select a track first.');
@@ -101677,7 +101858,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
       });
       return function playCachedSelectedTrack() {
-        return _ref14.apply(this, arguments);
+        return _ref15.apply(this, arguments);
       };
     }();
     var adjustNodeDelay = amount => {
@@ -101864,7 +102045,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           })
         }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
           style: styles.button,
-          onPress: () => transferSelectedTrackToNodes(),
+          onPress: () => _transferSelectedTrackToNodes(),
           children: /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
             style: styles.buttonText,
             children: "Manual Transfer Selected \uD83D\uDCE6"

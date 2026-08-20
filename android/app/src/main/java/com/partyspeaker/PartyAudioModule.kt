@@ -464,6 +464,42 @@ class PartyAudioModule(
     }
 
     @ReactMethod
+    fun getCurrentPlaybackPosition(promise: Promise) {
+        try {
+            val player = currentExoPlayer
+            if (player == null) {
+                promise.resolve(-1.0)
+                return
+            }
+            promise.resolve(player.currentPosition.toDouble())
+        } catch (error: Exception) {
+            promise.reject("GET_PLAYBACK_POSITION_ERROR", error)
+        }
+    }
+
+    @ReactMethod
+    fun seekCurrentPlayback(positionMs: Double, promise: Promise) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post {
+                seekCurrentPlayback(positionMs, promise)
+            }
+            return
+        }
+
+        try {
+            val player = currentExoPlayer
+            if (player == null) {
+                promise.reject("NO_ACTIVE_PLAYER", "No cached track is currently playing")
+                return
+            }
+            player.seekTo(positionMs.toLong().coerceAtLeast(0L))
+            promise.resolve(true)
+        } catch (error: Exception) {
+            promise.reject("SEEK_PLAYBACK_ERROR", error)
+        }
+    }
+
+    @ReactMethod
     fun playBeep(promise: Promise) {
         try {
             val toneGenerator = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
