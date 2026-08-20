@@ -59,9 +59,13 @@ const TRANSFER_CHUNK_SIZE = 12000;
 const TRANSFER_BATCH_SIZE = 4;
 const TRANSFER_BATCH_PAUSE_MS = 12;
 const TRACK_CACHE_TIMEOUT_MS = 120000;
-const DRIFT_CHECK_INTERVAL_MS = 1500;
-const DRIFT_HARD_RESYNC_MS = 350;
-const DRIFT_LOG_THRESHOLD_MS = 150;
+const DRIFT_CHECK_INTERVAL_MS = 750;
+const DRIFT_INITIAL_CHECK_MS = 450;
+const DRIFT_HARD_RESYNC_MS = 250;
+const DRIFT_LOG_THRESHOLD_MS = 120;
+const CLOCK_CALIBRATION_SAMPLES = 5;
+const CLOCK_CALIBRATION_SPACING_MS = 90;
+const CLOCK_CALIBRATION_SETTLE_MS = 650;
 const METADATA_HEAD_START_MS = 500;
 const TRANSFER_ACK_EVERY_CHUNKS = 8;
 const TRANSFER_ACK_TIMEOUT_MS = 8000;
@@ -101,7 +105,11 @@ export default function App() {
   const [playbackPositionText, setPlaybackPositionText] = useState('0:00');
   const [nowPlayingText, setNowPlayingText] = useState('Nothing playing');
   const [playbackState, setPlaybackState] = useState<'idle' | 'playing' | 'paused'>('idle');
+  const [nowPlayingTrackId, setNowPlayingTrackId] = useState<string | null>(null);
   const [nodePlaybackDelayMs, setNodePlaybackDelayMs] = useState(0);
+  const hostClockOffsetRef = useRef(0);
+  const nodePlaybackDelayRef = useRef(0);
+  const bestClockSampleRef = useRef<{rttMs: number; offsetMs: number} | null>(null);
 
   const serverRef = useRef<any>(null);
   const transferServerRef = useRef<any>(null);
@@ -135,6 +143,14 @@ export default function App() {
   useEffect(() => {
     refreshHostAddress();
   }, []);
+
+  useEffect(() => {
+    hostClockOffsetRef.current = hostClockOffsetMs;
+  }, [hostClockOffsetMs]);
+
+  useEffect(() => {
+    nodePlaybackDelayRef.current = nodePlaybackDelayMs;
+  }, [nodePlaybackDelayMs]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextState => {
@@ -253,10 +269,10 @@ export default function App() {
     return `${minutes}:${String(seconds).padStart(2, '0')}`;
   };
 
-  const getNodeHostNowMs = () => Date.now() + hostClockOffsetMs;
+  const getNodeHostNowMs = () => Date.now() + hostClockOffsetRef.current;
 
   const getPlaybackDelayCompensationMs = () => {
-    return nodePlaybackDelayMs;
+    return nodePlaybackDelayRef.current;
   };
 
   const startPlaybackUiClock = (trackName: string, startedAtHostMs: number) => {
@@ -280,34 +296,44 @@ export default function App() {
     }
   };
 
+  const correctNodePlaybackDrift = async (label = 'periodic') => {
+    if (mode !== 'node' || appStateRef.current !== 'active') return;
+    if (!nowPlayingRef.current || !currentlyPlayingTrackRef.current) return;
+
+    try {
+      const actualPosition = Number(await PartyAudio.getCurrentPlaybackPosition());
+      if (!Number.isFinite(actualPosition) || actualPosition < 0) return;
+
+      const expectedPosition = Math.max(
+        0,
+        getNodeHostNowMs() - nowPlayingRef.current.startedAtHostMs + getPlaybackDelayCompensationMs(),
+      );
+      const driftMs = actualPosition - expectedPosition;
+
+      if (Math.abs(driftMs) >= DRIFT_LOG_THRESHOLD_MS) {
+        addLog(`Playback drift (${label}): ${Math.round(driftMs)}ms`);
+      }
+
+      if (Math.abs(driftMs) >= DRIFT_HARD_RESYNC_MS) {
+        await PartyAudio.seekCurrentPlayback(expectedPosition);
+        addLog(`Playback resynced (${label}) by ${Math.round(-driftMs)}ms`);
+      }
+    } catch (error) {
+      addLog(`Drift check skipped: ${String(error)}`);
+    }
+  };
+
   const startNodeDriftMonitor = () => {
     stopNodeDriftMonitor();
 
-    nodeDriftTimerRef.current = setInterval(async () => {
-      if (mode !== 'node' || appStateRef.current !== 'active') return;
-      if (!nowPlayingRef.current || !currentlyPlayingTrackRef.current) return;
+    // The first correction happens quickly after ExoPlayer actually starts.
+    // This catches device-specific decoder/startup latency before it becomes audible drift.
+    setTimeout(() => {
+      correctNodePlaybackDrift('initial');
+    }, DRIFT_INITIAL_CHECK_MS);
 
-      try {
-        const actualPosition = Number(await PartyAudio.getCurrentPlaybackPosition());
-        if (!Number.isFinite(actualPosition) || actualPosition < 0) return;
-
-        const expectedPosition = Math.max(
-          0,
-          getNodeHostNowMs() - nowPlayingRef.current.startedAtHostMs + getPlaybackDelayCompensationMs(),
-        );
-        const driftMs = actualPosition - expectedPosition;
-
-        if (Math.abs(driftMs) >= DRIFT_LOG_THRESHOLD_MS) {
-          addLog(`Playback drift: ${Math.round(driftMs)}ms`);
-        }
-
-        if (Math.abs(driftMs) >= DRIFT_HARD_RESYNC_MS) {
-          await PartyAudio.seekCurrentPlayback(expectedPosition);
-          addLog(`Playback resynced by ${Math.round(-driftMs)}ms`);
-        }
-      } catch (error) {
-        addLog(`Drift check skipped: ${String(error)}`);
-      }
+    nodeDriftTimerRef.current = setInterval(() => {
+      correctNodePlaybackDrift();
     }, DRIFT_CHECK_INTERVAL_MS);
   };
 
@@ -326,6 +352,26 @@ export default function App() {
 
   const sendTimeSyncToNode = (socket: any) => {
     writeSocket(socket, `SYNC_TIME|${Date.now()}`);
+  };
+
+  const calibrateNodeClocksBeforePlayback = async () => {
+    const liveSockets = clientsRef.current.filter(isSocketUsable);
+    if (liveSockets.length === 0) return;
+
+    addLog(`Clock calibration burst: ${CLOCK_CALIBRATION_SAMPLES} samples`);
+
+    for (let sample = 0; sample < CLOCK_CALIBRATION_SAMPLES; sample += 1) {
+      const requestId = `${Date.now()}-${sample}-${Math.random()}`;
+      liveSockets.forEach(socket => {
+        writeSocket(socket, `SYNC_REQUEST|${requestId}`);
+      });
+
+      if (sample < CLOCK_CALIBRATION_SAMPLES - 1) {
+        await new Promise<void>(resolve => setTimeout(resolve, CLOCK_CALIBRATION_SPACING_MS));
+      }
+    }
+
+    await new Promise<void>(resolve => setTimeout(resolve, CLOCK_CALIBRATION_SETTLE_MS));
   };
 
   const broadcastNowPlaying = () => {
@@ -407,19 +453,15 @@ export default function App() {
 
       const nextPlaylist = [...playlistRef.current, track];
       playlistRef.current = nextPlaylist;
-      selectedTrackIdRef.current = track.id;
       setPlaylist(nextPlaylist);
-      setSelectedTrackId(track.id);
-      setCurrentTrackName(track.name);
-      setCurrentTrackMetadata(metadata);
-      setPlaybackState('idle');
+      setPlaybackState(previous => previous);
       setTrackProgress(track.id, 0);
       setTransferProgress(0);
       setTransferProgressText(`Waiting for speakers: ${track.name}`);
       addLog(`Added track + metadata: ${track.name}`);
 
       // Metadata/playlist goes out first on the tiny control channel.
-      syncPlaylistSnapshotToNodes(nextPlaylist, track.id);
+      syncPlaylistSnapshotToNodes(nextPlaylist, selectedTrackIdRef.current);
 
       // Give the control message a moment to render, then ask nodes to download
       // the binary file natively. No Base64 crosses the JS bridge.
@@ -598,6 +640,21 @@ export default function App() {
           }
 
           if (message === "I'M_ALIVE") {
+            return;
+          }
+
+          if (message.startsWith('SYNC_PING|')) {
+            const parts = message.split('|');
+            const requestId = parts[1];
+            const clientSentMs = Number(parts[2]);
+            if (requestId && Number.isFinite(clientSentMs)) {
+              const hostReceivedMs = Date.now();
+              const hostSentMs = Date.now();
+              writeSocket(
+                socket,
+                `SYNC_PONG|${requestId}|${clientSentMs}|${hostReceivedMs}|${hostSentMs}`,
+              );
+            }
             return;
           }
 
@@ -935,8 +992,8 @@ export default function App() {
     const nextIndex = (safeIndex + offset + playlist.length) % playlist.length;
     const nextTrack = playlist[nextIndex];
 
+    selectedTrackIdRef.current = nextTrack.id;
     setSelectedTrackId(nextTrack.id);
-    setCurrentTrackName(nextTrack.name);
     addLog(`Selected track: ${nextTrack.name}`);
     autoSyncAndTransfer(nextTrack, playlist, nextTrack.id);
 
@@ -1007,6 +1064,8 @@ export default function App() {
       return;
     }
 
+    await calibrateNodeClocksBeforePlayback();
+
     const targetTimeMs = Date.now() + START_BUFFER_MS;
     const payload = {
       id: selected.id,
@@ -1020,6 +1079,9 @@ export default function App() {
       trackName: selected.name,
       startedAtHostMs: targetTimeMs,
     };
+    setNowPlayingTrackId(selected.id);
+    setCurrentTrackName(selected.name);
+    if (selected.metadata) setCurrentTrackMetadata(selected.metadata);
 
     clientsRef.current.forEach(socket => {
       sendTimeSyncToNode(socket);
@@ -1281,10 +1343,41 @@ export default function App() {
         return;
       }
 
+      if (message.startsWith('SYNC_REQUEST|')) {
+        const requestId = message.split('|')[1];
+        if (requestId) {
+          writeSocket(client, `SYNC_PING|${requestId}|${Date.now()}`);
+        }
+        return;
+      }
+
+      if (message.startsWith('SYNC_PONG|')) {
+        const parts = message.split('|');
+        const clientSentMs = Number(parts[2]);
+        const hostReceivedMs = Number(parts[3]);
+        const hostSentMs = Number(parts[4]);
+        const clientReceivedMs = Date.now();
+
+        if ([clientSentMs, hostReceivedMs, hostSentMs].every(Number.isFinite)) {
+          const rttMs = Math.max(0, (clientReceivedMs - clientSentMs) - (hostSentMs - hostReceivedMs));
+          const offsetMs = Math.round(((hostReceivedMs - clientSentMs) + (hostSentMs - clientReceivedMs)) / 2);
+          const best = bestClockSampleRef.current;
+
+          if (!best || rttMs < best.rttMs) {
+            bestClockSampleRef.current = {rttMs, offsetMs};
+            hostClockOffsetRef.current = offsetMs;
+            setHostClockOffsetMs(offsetMs);
+            addLog(`Clock calibrated: ${offsetMs}ms offset, ${rttMs}ms RTT`);
+          }
+        }
+        return;
+      }
+
       if (message.startsWith('SYNC_TIME|')) {
         const hostNow = Number(message.split('|')[1]);
-        if (!Number.isNaN(hostNow)) {
+        if (!Number.isNaN(hostNow) && !bestClockSampleRef.current) {
           const offset = hostNow - Date.now();
+          hostClockOffsetRef.current = offset;
           setHostClockOffsetMs(offset);
           addLog(`Clock sync offset: ${offset}ms`);
         }
@@ -1311,6 +1404,8 @@ export default function App() {
               trackName: payload.trackName,
               startedAtHostMs: payload.startedAtHostMs,
             };
+            setNowPlayingTrackId(payload.trackId);
+            setCurrentTrackName(payload.trackName);
 
             startPlaybackUiClock(payload.trackName, payload.startedAtHostMs);
 
@@ -1381,9 +1476,8 @@ export default function App() {
           setSelectedTrackId(payload.selectedTrackId || null);
 
           const selected = syncedTracks.find(track => track.id === payload.selectedTrackId);
-          setCurrentTrackName(selected ? selected.name : 'None');
-          if (selected?.metadata) {
-            setCurrentTrackMetadata(selected.metadata);
+          if (selected?.metadata && !nowPlayingRef.current) {
+            // Keep queued/selected metadata separate from the Now Playing identity.
           }
 
           writeSocket(client, 'PLAYLIST_RECEIVED');
@@ -1819,6 +1913,7 @@ export default function App() {
       onMetadataChange={setCurrentTrackMetadata}
       selectedTrackReady={selectedTrackReadyForPlayback}
       playbackState={playbackState}
+      nowPlayingTrackId={nowPlayingTrackId}
       onPlayPause={() => {
         if (playbackState === 'playing') {
           pauseAllSpeakers();
