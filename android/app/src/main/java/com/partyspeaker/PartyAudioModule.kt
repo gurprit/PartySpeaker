@@ -12,9 +12,14 @@ import android.media.ToneGenerator
 import android.net.Uri
 import android.os.Handler
 import android.util.Base64
+import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.net.NetworkInterface
+import java.net.ServerSocket
+import java.net.Socket
+import java.util.concurrent.ConcurrentHashMap
 import android.os.Looper
 import android.provider.OpenableColumns
 import androidx.media3.common.MediaItem
@@ -43,6 +48,9 @@ class PartyAudioModule(
     private var currentExoPlayer: ExoPlayer? = null
     private var playbackLevelRunning = false
     private var playbackLevelHandler: Handler? = null
+    private val transferTracks = ConcurrentHashMap<String, String>()
+    @Volatile private var transferServerSocket: ServerSocket? = null
+    @Volatile private var transferServerRunning = false
 
     private val activityEventListener: ActivityEventListener =
         object : BaseActivityEventListener() {
@@ -456,6 +464,42 @@ class PartyAudioModule(
     }
 
     @ReactMethod
+    fun getCurrentPlaybackPosition(promise: Promise) {
+        try {
+            val player = currentExoPlayer
+            if (player == null) {
+                promise.resolve(-1.0)
+                return
+            }
+            promise.resolve(player.currentPosition.toDouble())
+        } catch (error: Exception) {
+            promise.reject("GET_PLAYBACK_POSITION_ERROR", error)
+        }
+    }
+
+    @ReactMethod
+    fun seekCurrentPlayback(positionMs: Double, promise: Promise) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post {
+                seekCurrentPlayback(positionMs, promise)
+            }
+            return
+        }
+
+        try {
+            val player = currentExoPlayer
+            if (player == null) {
+                promise.reject("NO_ACTIVE_PLAYER", "No cached track is currently playing")
+                return
+            }
+            player.seekTo(positionMs.toLong().coerceAtLeast(0L))
+            promise.resolve(true)
+        } catch (error: Exception) {
+            promise.reject("SEEK_PLAYBACK_ERROR", error)
+        }
+    }
+
+    @ReactMethod
     fun playBeep(promise: Promise) {
         try {
             val toneGenerator = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
@@ -531,8 +575,166 @@ class PartyAudioModule(
         }
     }
 
+
+    @ReactMethod
+    fun registerTrackForTransfer(trackId: String, uriString: String, promise: Promise) {
+        transferTracks[trackId] = uriString
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun startTrackTransferServer(port: Int, promise: Promise) {
+        if (transferServerRunning && transferServerSocket != null) {
+            promise.resolve(true)
+            return
+        }
+
+        try {
+            val server = ServerSocket(port)
+            transferServerSocket = server
+            transferServerRunning = true
+
+            thread(name = "PartySpeakerTransferServer", isDaemon = true) {
+                while (transferServerRunning) {
+                    try {
+                        val socket = server.accept()
+                        thread(name = "PartySpeakerTransferClient", isDaemon = true) {
+                            serveTrack(socket)
+                        }
+                    } catch (_: Exception) {
+                        if (transferServerRunning) {
+                            // Keep the loop alive for transient socket errors.
+                        }
+                    }
+                }
+            }
+
+            promise.resolve(true)
+        } catch (error: Exception) {
+            transferServerRunning = false
+            transferServerSocket = null
+            promise.reject("TRACK_SERVER_ERROR", error)
+        }
+    }
+
+    private fun serveTrack(socket: Socket) {
+        socket.use { client ->
+            try {
+                client.tcpNoDelay = true
+                val input = DataInputStream(client.getInputStream())
+                val output = DataOutputStream(client.getOutputStream())
+                val trackId = input.readUTF()
+                val uriString = transferTracks[trackId]
+
+                if (uriString == null) {
+                    output.writeInt(0)
+                    output.writeUTF("Track is not registered on host")
+                    output.flush()
+                    return
+                }
+
+                val uri = Uri.parse(uriString)
+                val stream = reactContext.contentResolver.openInputStream(uri)
+                if (stream == null) {
+                    output.writeInt(0)
+                    output.writeUTF("Could not open track on host")
+                    output.flush()
+                    return
+                }
+
+                output.writeInt(1)
+                val buffer = ByteArray(64 * 1024)
+                stream.use { source ->
+                    while (true) {
+                        val count = source.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                    }
+                }
+                output.flush()
+            } catch (_: Exception) {
+                // The client will surface download failures through its promise.
+            }
+        }
+    }
+
+    @ReactMethod
+    fun downloadTrackFromHost(
+        host: String,
+        port: Int,
+        trackId: String,
+        fileName: String,
+        promise: Promise
+    ) {
+        thread(name = "PartySpeakerTrackDownload") {
+            var tempFile: File? = null
+            try {
+                val safeTrackId = trackId.replace(Regex("[^A-Za-z0-9_-]"), "_")
+                val safeFileName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
+                val tracksDir = File(reactContext.filesDir, "party_tracks")
+                if (!tracksDir.exists()) tracksDir.mkdirs()
+
+                val outputFile = File(tracksDir, "${safeTrackId}_${safeFileName}")
+                tempFile = File(tracksDir, "${safeTrackId}_${safeFileName}.part")
+                if (tempFile.exists()) tempFile.delete()
+
+                Socket(host, port).use { socket ->
+                    socket.tcpNoDelay = true
+                    socket.soTimeout = 60000
+                    val output = DataOutputStream(socket.getOutputStream())
+                    val input = DataInputStream(socket.getInputStream())
+
+                    output.writeUTF(trackId)
+                    output.flush()
+
+                    val status = input.readInt()
+                    if (status != 1) {
+                        val message = try { input.readUTF() } catch (_: Exception) { "Host rejected track download" }
+                        throw IllegalStateException(message)
+                    }
+
+                    FileOutputStream(tempFile).use { fileOutput ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            fileOutput.write(buffer, 0, count)
+                        }
+                        fileOutput.flush()
+                    }
+                }
+
+                if (tempFile.length() <= 0L) {
+                    throw IllegalStateException("Downloaded track is empty")
+                }
+
+                if (outputFile.exists()) outputFile.delete()
+                if (!tempFile.renameTo(outputFile)) {
+                    tempFile.copyTo(outputFile, overwrite = true)
+                    tempFile.delete()
+                }
+
+                promise.resolve(outputFile.absolutePath)
+            } catch (error: Exception) {
+                try { tempFile?.delete() } catch (_: Exception) {}
+                promise.reject("TRACK_DOWNLOAD_ERROR", error)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun stopTrackTransferServer(promise: Promise) {
+        transferServerRunning = false
+        try { transferServerSocket?.close() } catch (_: Exception) {}
+        transferServerSocket = null
+        promise.resolve(true)
+    }
+
     override fun invalidate() {
         super.invalidate()
+        transferServerRunning = false
+        try { transferServerSocket?.close() } catch (_: Exception) {}
+        transferServerSocket = null
         stopCurrentPlayer()
     }
 }

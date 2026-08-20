@@ -10,9 +10,11 @@ import PartyButton from './src/components/ui/PartyButton';
 import SectionLabel from './src/components/ui/SectionLabel';
 import {partyTheme} from './src/components/ui/PartyTheme';
 import {TrackMetadata} from './src/types/TrackMetadata';
+import MetadataService from './src/services/MetadataService';
 import React, {useEffect, useRef, useState} from 'react';
 import {
   Alert,
+  AppState,
   NativeModules,
   SafeAreaView,
   Text,
@@ -36,6 +38,7 @@ type Track = {
   id: string;
   name: string;
   uri: string;
+  metadata?: TrackMetadata;
 };
 
 type DiscoveredHost = {
@@ -48,6 +51,7 @@ const {PartyAudio} = NativeModules;
 
 const TCP_PORT = 5050;
 const UDP_PORT = 5051;
+const TRANSFER_PORT = 5052;
 const START_BUFFER_MS = 5000;
 const BLUETOOTH_LATENCY_COMPENSATION_MS = 0;
 const DISCOVERY_MESSAGE = 'PARTYSPEAKER_HOST';
@@ -55,7 +59,12 @@ const TRANSFER_CHUNK_SIZE = 12000;
 const TRANSFER_BATCH_SIZE = 4;
 const TRANSFER_BATCH_PAUSE_MS = 12;
 const TRACK_CACHE_TIMEOUT_MS = 120000;
+const DRIFT_CHECK_INTERVAL_MS = 1500;
+const DRIFT_HARD_RESYNC_MS = 350;
+const DRIFT_LOG_THRESHOLD_MS = 150;
 const METADATA_HEAD_START_MS = 500;
+const TRANSFER_ACK_EVERY_CHUNKS = 8;
+const TRANSFER_ACK_TIMEOUT_MS = 8000;
 
 
 export default function App() {
@@ -95,31 +104,115 @@ export default function App() {
   const [nodePlaybackDelayMs, setNodePlaybackDelayMs] = useState(0);
 
   const serverRef = useRef<any>(null);
+  const transferServerRef = useRef<any>(null);
   const clientsRef = useRef<any[]>([]);
+  const transferClientsRef = useRef<any[]>([]);
   const clientRef = useRef<any>(null);
+  const transferClientRef = useRef<any>(null);
   const udpHostRef = useRef<any>(null);
   const broadcastTimerRef = useRef<any>(null);
   const countdownTimerRef = useRef<any>(null);
   const playbackUiTimerRef = useRef<any>(null);
   const nowPlayingBroadcastTimerRef = useRef<any>(null);
   const nodeHeartbeatTimerRef = useRef<any>(null);
+  const nodeDriftTimerRef = useRef<any>(null);
+  const nodeReconnectTimerRef = useRef<any>(null);
+  const nodeReconnectAttemptRef = useRef(0);
+  const nodeReconnectScheduledRef = useRef(false);
+  const nodeManualDisconnectRef = useRef(false);
+  const lastHostIpRef = useRef<string | null>(null);
+  const appStateRef = useRef(AppState.currentState);
   const nowPlayingRef = useRef<{trackId: string; trackName: string; startedAtHostMs: number} | null>(null);
   const currentlyPlayingTrackRef = useRef<string | null>(null);
   const transferBuffersRef = useRef<Record<string, {name: string; chunks: string[]}>>({});
   const cachedTracksRef = useRef<Record<string, string[]>>({});
+  const nodeCachedTrackIdsRef = useRef<Set<string>>(new Set());
   const activeTransferIdsRef = useRef<Set<string>>(new Set());
+  const playlistRef = useRef<Track[]>([]);
+  const selectedTrackIdRef = useRef<string | null>(null);
+  const transferAckRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     refreshHostAddress();
   }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextState => {
+      const previousState = appStateRef.current;
+      appStateRef.current = nextState;
+
+      if (mode === 'host' && (previousState === 'background' || previousState === 'inactive') && nextState === 'active') {
+        clientsRef.current = clientsRef.current.filter(isSocketUsable);
+        setNodeCount(clientsRef.current.length);
+        activeTransferIdsRef.current.clear();
+        addLog('Host resumed; waiting for speakers to reconnect before retrying transfer');
+
+        setTimeout(() => {
+          const selected = getLatestSelectedTrack();
+          if (!selected) return;
+          syncPlaylistSnapshotToNodes(playlistRef.current, selectedTrackIdRef.current);
+          transferSelectedTrackToNodes(selected);
+        }, 1500);
+        return;
+      }
+
+      if (mode !== 'node') return;
+
+      if ((previousState === 'background' || previousState === 'inactive') && nextState === 'active') {
+        addLog('Node returned to foreground; requesting live resync');
+        stopNodeDriftMonitor();
+        currentlyPlayingTrackRef.current = null;
+
+        if (isSocketUsable(clientRef.current)) {
+          writeSocket(clientRef.current, 'NODE_RESUMED');
+          writeSocket(
+            clientRef.current,
+            `NODE_CACHE_STATE|${JSON.stringify(Array.from(nodeCachedTrackIdsRef.current))}`,
+          );
+        }
+      }
+
+      if (nextState === 'background' || nextState === 'inactive') {
+        addLog('Node moved to background');
+      }
+    });
+
+    return () => subscription.remove();
+  }, [mode]);
 
   const addLog = (message: string) => {
     const time = new Date().toLocaleTimeString();
     setLog(previous => [`${time}  ${message}`, ...previous].slice(0, 14));
   };
 
+  const isSocketUsable = (socket: any) => {
+    return Boolean(socket) && socket.destroyed !== true && socket.writable !== false;
+  };
+
+  const pruneHostSocket = (socket: any, reason = 'socket unavailable') => {
+    const before = clientsRef.current.length;
+    clientsRef.current = clientsRef.current.filter(item => item !== socket && isSocketUsable(item));
+
+    if (clientsRef.current.length !== before) {
+      setNodeCount(clientsRef.current.length);
+      addLog(`Pruned speaker (${reason}); ${clientsRef.current.length} connected`);
+    }
+  };
+
   const writeSocket = (socket: any, message: string) => {
-    socket.write(`${message}\n`);
+    if (!isSocketUsable(socket)) {
+      pruneHostSocket(socket, 'write skipped: closed');
+      return false;
+    }
+
+    try {
+      socket.write(`${message}\n`);
+      return true;
+    } catch (error) {
+      pruneHostSocket(socket, `write failed: ${String(error)}`);
+      addLog(`Socket write ignored: ${String(error)}`);
+      return false;
+    }
   };
 
   const refreshHostAddress = async () => {
@@ -180,12 +273,51 @@ export default function App() {
     }, 500);
   };
 
+  const stopNodeDriftMonitor = () => {
+    if (nodeDriftTimerRef.current) {
+      clearInterval(nodeDriftTimerRef.current);
+      nodeDriftTimerRef.current = null;
+    }
+  };
+
+  const startNodeDriftMonitor = () => {
+    stopNodeDriftMonitor();
+
+    nodeDriftTimerRef.current = setInterval(async () => {
+      if (mode !== 'node' || appStateRef.current !== 'active') return;
+      if (!nowPlayingRef.current || !currentlyPlayingTrackRef.current) return;
+
+      try {
+        const actualPosition = Number(await PartyAudio.getCurrentPlaybackPosition());
+        if (!Number.isFinite(actualPosition) || actualPosition < 0) return;
+
+        const expectedPosition = Math.max(
+          0,
+          getNodeHostNowMs() - nowPlayingRef.current.startedAtHostMs + getPlaybackDelayCompensationMs(),
+        );
+        const driftMs = actualPosition - expectedPosition;
+
+        if (Math.abs(driftMs) >= DRIFT_LOG_THRESHOLD_MS) {
+          addLog(`Playback drift: ${Math.round(driftMs)}ms`);
+        }
+
+        if (Math.abs(driftMs) >= DRIFT_HARD_RESYNC_MS) {
+          await PartyAudio.seekCurrentPlayback(expectedPosition);
+          addLog(`Playback resynced by ${Math.round(-driftMs)}ms`);
+        }
+      } catch (error) {
+        addLog(`Drift check skipped: ${String(error)}`);
+      }
+    }, DRIFT_CHECK_INTERVAL_MS);
+  };
+
   const stopPlaybackUiClock = () => {
     if (playbackUiTimerRef.current) {
       clearInterval(playbackUiTimerRef.current);
       playbackUiTimerRef.current = null;
     }
 
+    stopNodeDriftMonitor();
     currentlyPlayingTrackRef.current = null;
     setPlaybackPositionText('0:00');
     setNowPlayingText('Nothing playing');
@@ -206,6 +338,8 @@ export default function App() {
       hostNowMs: Date.now(),
     };
 
+    clientsRef.current = clientsRef.current.filter(isSocketUsable);
+    setNodeCount(clientsRef.current.length);
     clientsRef.current.forEach(socket => {
       writeSocket(socket, `NOW_PLAYING|${JSON.stringify(payload)}`);
     });
@@ -220,6 +354,19 @@ export default function App() {
       ...previous,
       [trackId]: Math.max(0, Math.min(100, percent)),
     }));
+  };
+
+  useEffect(() => {
+    playlistRef.current = playlist;
+  }, [playlist]);
+
+  useEffect(() => {
+    selectedTrackIdRef.current = selectedTrackId;
+  }, [selectedTrackId]);
+
+  const getLatestSelectedTrack = () => {
+    const id = selectedTrackIdRef.current;
+    return id ? playlistRef.current.find(track => track.id === id) || null : null;
   };
 
   const autoSyncAndTransfer = (track?: Track, playlistSnapshot?: Track[], selectedIdSnapshot?: string | null) => {
@@ -246,22 +393,37 @@ export default function App() {
   const addTrack = async () => {
     try {
       const result = await PartyAudio.pickAudioFile();
+      const trackName = result.name || 'Selected audio';
+      const metadata = await MetadataService.getMetadata(trackName, result.uri);
 
       const track: Track = {
         id: `${Date.now()}-${Math.random()}`,
-        name: result.name || 'Selected audio',
+        name: trackName,
         uri: result.uri,
+        metadata,
       };
 
-      const nextPlaylist = [...playlist, track];
+      await PartyAudio.registerTrackForTransfer(track.id, track.uri);
 
+      const nextPlaylist = [...playlistRef.current, track];
+      playlistRef.current = nextPlaylist;
+      selectedTrackIdRef.current = track.id;
       setPlaylist(nextPlaylist);
       setSelectedTrackId(track.id);
       setCurrentTrackName(track.name);
+      setCurrentTrackMetadata(metadata);
       setPlaybackState('idle');
       setTrackProgress(track.id, 0);
-      addLog(`Added track: ${track.name}`);
-      autoSyncAndTransfer(track, nextPlaylist, track.id);
+      setTransferProgress(0);
+      setTransferProgressText(`Waiting for speakers: ${track.name}`);
+      addLog(`Added track + metadata: ${track.name}`);
+
+      // Metadata/playlist goes out first on the tiny control channel.
+      syncPlaylistSnapshotToNodes(nextPlaylist, track.id);
+
+      // Give the control message a moment to render, then ask nodes to download
+      // the binary file natively. No Base64 crosses the JS bridge.
+      setTimeout(() => transferSelectedTrackToNodes(track), 150);
     } catch (error) {
       addLog(`Add track cancelled/error: ${String(error)}`);
     }
@@ -393,6 +555,7 @@ export default function App() {
 
   const startHostServer = async () => {
     await refreshHostAddress();
+    await PartyAudio.startTrackTransferServer(TRANSFER_PORT);
 
     if (serverRef.current) {
       setStatus('Host server already running');
@@ -409,9 +572,15 @@ export default function App() {
       sendTimeSyncToNode(socket);
 
       setTimeout(() => {
-        syncPlaylistSnapshotToNodes(playlist, selectedTrackId);
+        syncPlaylistSnapshotToNodes(playlistRef.current, selectedTrackIdRef.current);
         broadcastNowPlaying();
-      }, 300);
+
+        const selected = getLatestSelectedTrack();
+        if (selected) {
+          activeTransferIdsRef.current.delete(selected.id);
+          transferSelectedTrackToNodes(selected);
+        }
+      }, 500);
 
       socket.on('data', data => {
         (socket as unknown as PartySocketBuffer)._partyBuffer = `${(socket as unknown as PartySocketBuffer)._partyBuffer || ''}${data.toString()}`;
@@ -437,6 +606,61 @@ export default function App() {
             addLog('Node confirmed playlist sync');
           }
 
+          if (message === 'NODE_RESUMED') {
+            addLog('Speaker resumed; sending fresh clock + playback state');
+            sendTimeSyncToNode(socket);
+
+            const playlistPayload = {
+              tracks: playlistRef.current.map(track => ({
+                id: track.id,
+                name: track.name,
+                metadata: track.metadata,
+              })),
+              selectedTrackId: selectedTrackIdRef.current,
+            };
+
+            writeSocket(socket, `PLAYLIST_SYNC|${JSON.stringify(playlistPayload)}`);
+
+            if (nowPlayingRef.current) {
+              writeSocket(
+                socket,
+                `NOW_PLAYING|${JSON.stringify({
+                  ...nowPlayingRef.current,
+                  hostNowMs: Date.now(),
+                })}`,
+              );
+            }
+            return;
+          }
+
+          if (message.startsWith('NODE_CACHE_STATE|')) {
+            try {
+              const cachedIds = JSON.parse(message.replace('NODE_CACHE_STATE|', ''));
+              const key = socket.remoteAddress || 'unknown';
+              cachedTracksRef.current[key] = Array.isArray(cachedIds) ? cachedIds : [];
+              addLog(`Speaker cache restored: ${cachedTracksRef.current[key].length} track(s)`);
+
+              const selected = getLatestSelectedTrack();
+              if (selected) {
+                const liveSockets = clientsRef.current.filter(isSocketUsable);
+                const readyCount = liveSockets.filter(clientSocket => {
+                  const clientKey = clientSocket.remoteAddress || 'unknown';
+                  return cachedTracksRef.current[clientKey]?.includes(selected.id);
+                }).length;
+
+                if (liveSockets.length > 0 && readyCount === liveSockets.length) {
+                  setTrackProgress(selected.id, 100);
+                  setTransferProgress(100);
+                  setTransferProgressText(`Ready: ${selected.name}`);
+                  setStatus(`Ready on all speakers: ${selected.name}`);
+                }
+              }
+            } catch (error) {
+              addLog(`Invalid cache-state message: ${String(error)}`);
+            }
+            return;
+          }
+
           if (message.startsWith('TRACK_RECEIVED|')) {
             const parts = message.split('|');
             const trackId = parts[1];
@@ -452,20 +676,36 @@ export default function App() {
               cachedTracksRef.current[key].push(trackId);
             }
 
-            const cachedCount = clientsRef.current.filter(clientSocket => {
+            const liveSockets = clientsRef.current.filter(isSocketUsable);
+            const cachedCount = liveSockets.filter(clientSocket => {
               const clientKey = clientSocket.remoteAddress || 'unknown';
               return cachedTracksRef.current[clientKey]?.includes(trackId);
             }).length;
 
-            addLog(`Node cached track: ${trackName} (${cachedCount}/${clientsRef.current.length})`);
+            addLog(`Node cached track: ${trackName} (${cachedCount}/${liveSockets.length})`);
 
-            if (cachedCount === clientsRef.current.length) {
-              setTransferProgress(100);
+            const isSelectedTrack = selectedTrackIdRef.current === trackId;
+
+            if (liveSockets.length > 0 && cachedCount === liveSockets.length) {
+              activeTransferIdsRef.current.delete(trackId);
               setTrackProgress(trackId, 100);
-              setTransferProgressText(`Ready: ${trackName}`);
-              setStatus(`Ready on all speakers: ${trackName}`);
-            } else {
-              setTransferProgressText(`Caching ${trackName}: ${cachedCount}/${clientsRef.current.length} speakers ready`);
+
+              if (isSelectedTrack) {
+                setTransferProgress(100);
+                setTransferProgressText(`Ready: ${trackName}`);
+                setStatus(`Ready on all speakers: ${trackName}`);
+              }
+            } else if (isSelectedTrack) {
+              setTransferProgressText(`Caching ${trackName}: ${cachedCount}/${liveSockets.length} active speakers ready`);
+            }
+          }
+
+          if (message.startsWith('TRACK_DOWNLOAD_FAILED|')) {
+            const [, trackId, detail] = message.split('|');
+            activeTransferIdsRef.current.delete(trackId);
+            addLog(`Speaker download failed for ${trackId}: ${detail || 'unknown error'}`);
+            if (selectedTrackIdRef.current === trackId) {
+              setStatus('A speaker failed to download the track');
             }
           }
 
@@ -477,6 +717,7 @@ export default function App() {
       });
 
       socket.on('close', () => {
+        activeTransferIdsRef.current.clear();
         clientsRef.current = clientsRef.current.filter(item => item !== socket);
         setNodeCount(clientsRef.current.length);
         setStatus('Node disconnected');
@@ -484,6 +725,7 @@ export default function App() {
       });
 
       (socket as any).on('error', (error: any) => {
+        pruneHostSocket(socket, String(error));
         setStatus(`Socket error: ${String(error)}`);
         addLog(`Socket error: ${String(error)}`);
       });
@@ -638,6 +880,9 @@ export default function App() {
       serverRef.current = null;
     }
 
+    PartyAudio.stopTrackTransferServer().catch(() => {});
+
+
     if (nowPlayingBroadcastTimerRef.current) {
       clearInterval(nowPlayingBroadcastTimerRef.current);
       nowPlayingBroadcastTimerRef.current = null;
@@ -701,11 +946,12 @@ export default function App() {
   };
 
   const isTrackCachedOnAllNodes = (trackId: string) => {
-    if (clientsRef.current.length === 0) {
+    const liveSockets = clientsRef.current.filter(isSocketUsable);
+    if (liveSockets.length === 0) {
       return false;
     }
 
-    return clientsRef.current.every(socket => {
+    return liveSockets.every(socket => {
       const key = socket.remoteAddress || 'unknown';
       return cachedTracksRef.current[key]?.includes(trackId);
     });
@@ -749,15 +995,15 @@ export default function App() {
       return;
     }
 
-    try {
-      if (!isTrackCachedOnAllNodes(selected.id)) {
-        addLog(`Selected track not cached everywhere. Transferring first: ${selected.name}`);
-        await transferSelectedTrackToNodes(selected);
-        await waitForTrackCachedOnAllNodes(selected);
-      }
-    } catch (error) {
-      addLog(`Cannot play yet: ${String(error)}`);
-      Alert.alert('Track not ready', String(error));
+    if (!isTrackCachedOnAllNodes(selected.id)) {
+      const readyCount = clientsRef.current.filter(socket => {
+        const key = socket.remoteAddress || 'unknown';
+        return cachedTracksRef.current[key]?.includes(selected.id);
+      }).length;
+      const message = `Still downloading to speakers (${readyCount}/${clientsRef.current.length} ready)`;
+      addLog(message);
+      setStatus(message);
+      Alert.alert('Track still downloading', message);
       return;
     }
 
@@ -793,16 +1039,23 @@ export default function App() {
   };
 
   const transferSelectedTrackToNodes = async (trackOverride?: Track) => {
-    const selected = trackOverride || getSelectedTrack();
+    const selected = trackOverride || getLatestSelectedTrack();
+    if (!selected || clientsRef.current.length === 0) return;
 
-    if (!selected) {
-      Alert.alert('No track selected', 'Add and select a track first.');
-      return;
-    }
+    const liveSockets = clientsRef.current.filter(isSocketUsable);
+    const missingSockets = liveSockets.filter(socket => {
+      const key = socket.remoteAddress || 'unknown';
+      return !cachedTracksRef.current[key]?.includes(selected.id);
+    });
 
-    if (clientsRef.current.length === 0) {
-      addLog('No nodes connected');
-      setStatus('No nodes connected');
+    if (missingSockets.length === 0) {
+      activeTransferIdsRef.current.delete(selected.id);
+      setTrackProgress(selected.id, 100);
+      if (selectedTrackIdRef.current === selected.id) {
+        setTransferProgress(100);
+        setTransferProgressText(`Ready: ${selected.name}`);
+        setStatus(`Ready on all speakers: ${selected.name}`);
+      }
       return;
     }
 
@@ -811,85 +1064,30 @@ export default function App() {
       return;
     }
 
-    const targetSockets = clientsRef.current.filter(socket => {
-      const key = socket.remoteAddress || 'unknown';
-      return !cachedTracksRef.current[key]?.includes(selected.id);
+    activeTransferIdsRef.current.add(selected.id);
+    await PartyAudio.registerTrackForTransfer(selected.id, selected.uri);
+    const payload = {id: selected.id, name: selected.name};
+    let successfulWrites = 0;
+    missingSockets.forEach(socket => {
+      if (writeSocket(socket, `DOWNLOAD_TRACK|${JSON.stringify(payload)}`)) {
+        successfulWrites += 1;
+      }
     });
 
-    if (targetSockets.length === 0) {
-      addLog(`Skipping transfer. All nodes already cached ${selected.name}`);
-      setStatus('Already cached on all nodes');
-      setTransferProgressText(`Ready: ${selected.name}`);
-      setTransferProgress(100);
-      setTrackProgress(selected.id, 100);
+    if (successfulWrites === 0) {
+      activeTransferIdsRef.current.delete(selected.id);
+      addLog(`Download command could not reach any speaker; retrying ${selected.name}`);
+      setTimeout(() => transferSelectedTrackToNodes(selected), 1500);
       return;
     }
 
-    activeTransferIdsRef.current.add(selected.id);
-
-    try {
-      setTransferProgress(0);
-      setTrackProgress(selected.id, 0);
-      setTransferProgressText(`Preparing: ${selected.name}`);
-      setStatus('Reading selected track...');
-      addLog(`Reading track for transfer: ${selected.name}`);
-
-      const base64: string = await PartyAudio.readAudioUriAsBase64(selected.uri);
-      const chunks: string[] = [];
-
-      for (let i = 0; i < base64.length; i += TRANSFER_CHUNK_SIZE) {
-        chunks.push(base64.slice(i, i + TRANSFER_CHUNK_SIZE));
-      }
-
-      const startPayload = {
-        id: selected.id,
-        name: selected.name,
-        chunks: chunks.length,
-        bytes: base64.length,
-      };
-
-      targetSockets.forEach(socket => {
-        writeSocket(socket, `TRACK_TRANSFER_START|${JSON.stringify(startPayload)}`);
-      });
-
-      // Send small batches and yield to the JS/native socket bridge. This prevents
-      // large files from starving playlist, metadata, heartbeat and playback messages.
-      for (let i = 0; i < chunks.length; i++) {
-        targetSockets.forEach(socket => {
-          writeSocket(socket, `TRACK_TRANSFER_CHUNK|${selected.id}|${i}|${chunks[i]}`);
-        });
-
-        const isBatchBoundary =
-          (i + 1) % TRANSFER_BATCH_SIZE === 0 || i === chunks.length - 1;
-
-        if (isBatchBoundary) {
-          const percent = Math.min(99, Math.round(((i + 1) / chunks.length) * 100));
-          setTransferProgress(percent);
-          setTrackProgress(selected.id, percent);
-          setTransferProgressText(`Sending ${selected.name}: ${percent}%`);
-          setStatus(`Sending ${selected.name}: ${i + 1}/${chunks.length} chunks`);
-          await new Promise<void>(resolve => setTimeout(resolve, TRANSFER_BATCH_PAUSE_MS));
-        }
-      }
-
-      targetSockets.forEach(socket => {
-        writeSocket(socket, `TRACK_TRANSFER_END|${selected.id}`);
-      });
-
-      // 100% now means confirmed cached, not merely written to the socket.
-      setTransferProgress(99);
-      setTrackProgress(selected.id, 99);
-      setTransferProgressText(`Finalising ${selected.name} on speakers…`);
-      setStatus('Waiting for speaker cache confirmations');
-      addLog(`Track data sent: ${selected.name} (${chunks.length} chunks to ${targetSockets.length} node(s))`);
-    } catch (error) {
-      addLog(`Track transfer error: ${String(error)}`);
-      setTransferProgressText(`Transfer failed: ${selected.name}`);
-      setStatus('Track transfer failed');
-      Alert.alert('Track transfer error', String(error));
-    } finally {
-      activeTransferIdsRef.current.delete(selected.id);
+    setTrackProgress(selected.id, 1);
+    if (selectedTrackIdRef.current === selected.id) {
+      setTransferProgress(1);
+      setTransferProgressText(`Downloading on ${missingSockets.length} speaker(s): ${selected.name}`);
+      setStatus(`Waiting for ${missingSockets.length} speaker download(s)`);
     }
+    addLog(`Native download requested: ${selected.name}`);
   };
 
   const syncPlaylistSnapshotToNodes = (tracksSnapshot: Track[], selectedIdSnapshot: string | null) => {
@@ -903,6 +1101,7 @@ export default function App() {
       tracks: tracksSnapshot.map(track => ({
         id: track.id,
         name: track.name,
+        metadata: track.metadata,
       })),
       selectedTrackId: selectedIdSnapshot,
     };
@@ -931,6 +1130,7 @@ export default function App() {
       tracks: playlist.map(track => ({
         id: track.id,
         name: track.name,
+        metadata: track.metadata,
       })),
       selectedTrackId,
     };
@@ -994,6 +1194,14 @@ export default function App() {
 
   const connectToHost = (ipOverride?: string) => {
     const ipToUse = ipOverride || hostIp;
+    lastHostIpRef.current = ipToUse;
+    nodeManualDisconnectRef.current = false;
+    nodeReconnectScheduledRef.current = false;
+
+    if (nodeReconnectTimerRef.current) {
+      clearTimeout(nodeReconnectTimerRef.current);
+      nodeReconnectTimerRef.current = null;
+    }
 
     if (clientRef.current) {
       addLog('Closing stale connection before reconnecting');
@@ -1009,9 +1217,12 @@ export default function App() {
     const client = TcpSocket.createConnection(
       {host: ipToUse, port: TCP_PORT},
       () => {
+        nodeReconnectAttemptRef.current = 0;
+        nodeReconnectScheduledRef.current = false;
         setStatus('Node connected');
         addLog('Connected to host');
         writeSocket(client, 'NODE_CONNECTED');
+        writeSocket(client, `NODE_CACHE_STATE|${JSON.stringify(Array.from(nodeCachedTrackIdsRef.current))}`);
 
         if (nodeHeartbeatTimerRef.current) {
           clearInterval(nodeHeartbeatTimerRef.current);
@@ -1019,22 +1230,55 @@ export default function App() {
 
         nodeHeartbeatTimerRef.current = setInterval(() => {
           if (clientRef.current) {
-            try {
-              writeSocket(clientRef.current, "I'M_ALIVE");
-            } catch (error) {
-              addLog(`Heartbeat failed: ${String(error)}`);
+            const sent = writeSocket(clientRef.current, "I'M_ALIVE");
+            if (!sent) {
+              addLog('Heartbeat detected a dead connection');
+              try { clientRef.current?.destroy(); } catch {}
             }
           }
         }, 5000);
       },
     );
 
-    const handleHostMessage = async (message: string) => {
+    const handleHostMessage = async (message: string, responseSocket: any = clientRef.current) => {
       const isTransferChunk = message.startsWith('TRACK_TRANSFER_CHUNK|');
 
       if (!isTransferChunk) {
         setLastMessage(message);
         addLog(`Host says: ${message}`);
+      }
+
+
+      if (message.startsWith('DOWNLOAD_TRACK|')) {
+        try {
+          const payload = JSON.parse(message.replace('DOWNLOAD_TRACK|', ''));
+          if (!payload.id || !payload.name) return;
+
+          setStatus(`Downloading: ${payload.name}`);
+          setTrackProgress(payload.id, 1);
+          addLog(`Native download started: ${payload.name}`);
+
+          await PartyAudio.downloadTrackFromHost(
+            ipToUse,
+            TRANSFER_PORT,
+            payload.id,
+            payload.name,
+          );
+
+          nodeCachedTrackIdsRef.current.add(payload.id);
+          setTrackProgress(payload.id, 100);
+          setStatus(`Track cached: ${payload.name}`);
+          addLog(`Native download complete: ${payload.name}`);
+          writeSocket(client, `TRACK_RECEIVED|${payload.id}|${payload.name}`);
+        } catch (error) {
+          setStatus('Track download failed');
+          addLog(`Native download error: ${String(error)}`);
+          try {
+            const payload = JSON.parse(message.replace('DOWNLOAD_TRACK|', ''));
+            writeSocket(client, `TRACK_DOWNLOAD_FAILED|${payload.id}|${String(error)}`);
+          } catch {}
+        }
+        return;
       }
 
       if (message.startsWith('SYNC_TIME|')) {
@@ -1130,6 +1374,7 @@ export default function App() {
             id: track.id,
             name: track.name,
             uri: '',
+            metadata: track.metadata,
           }));
 
           setPlaylist(syncedTracks);
@@ -1137,6 +1382,9 @@ export default function App() {
 
           const selected = syncedTracks.find(track => track.id === payload.selectedTrackId);
           setCurrentTrackName(selected ? selected.name : 'None');
+          if (selected?.metadata) {
+            setCurrentTrackMetadata(selected.metadata);
+          }
 
           writeSocket(client, 'PLAYLIST_RECEIVED');
           addLog(`Synced playlist received: ${syncedTracks.length} track(s)`);
@@ -1168,6 +1416,12 @@ export default function App() {
         const buffer = transferBuffersRef.current[trackId];
         if (buffer && !Number.isNaN(index)) {
           buffer.chunks[index] = chunk;
+          if ((index + 1) % TRANSFER_ACK_EVERY_CHUNKS === 0 || index === buffer.chunks.length - 1) {
+            if (responseSocket) {
+              writeSocket(responseSocket, `TRANSFER_ACK|${trackId}|${index}`);
+            }
+          }
+
           if (index % TRANSFER_BATCH_SIZE === 0 || index === buffer.chunks.length - 1) {
             const percent = Math.min(99, Math.round(((index + 1) / buffer.chunks.length) * 100));
             setTrackProgress(trackId, percent);
@@ -1265,14 +1519,34 @@ export default function App() {
       });
     });
 
+    const scheduleReconnect = (reason: string) => {
+      if (nodeManualDisconnectRef.current || nodeReconnectScheduledRef.current) return;
+      const ip = lastHostIpRef.current;
+      if (!ip) return;
+
+      nodeReconnectScheduledRef.current = true;
+      const attempt = nodeReconnectAttemptRef.current + 1;
+      nodeReconnectAttemptRef.current = attempt;
+      const delay = Math.min(10000, 1000 * Math.pow(2, Math.min(attempt - 1, 3)));
+
+      setStatus(`Connection lost. Reconnecting in ${Math.round(delay / 1000)}s…`);
+      addLog(`Connection lost (${reason}); reconnect attempt ${attempt} in ${delay}ms`);
+
+      nodeReconnectTimerRef.current = setTimeout(() => {
+        nodeReconnectTimerRef.current = null;
+        nodeReconnectScheduledRef.current = false;
+        connectToHost(ip);
+      }, delay);
+    };
+
     client.on('error', error => {
-      setStatus(`Connection error: ${String(error)}`);
-      Alert.alert('Connection error', String(error));
+      addLog(`Connection error: ${String(error)}`);
       if (nodeHeartbeatTimerRef.current) {
         clearInterval(nodeHeartbeatTimerRef.current);
         nodeHeartbeatTimerRef.current = null;
       }
-      clientRef.current = null;
+      if (clientRef.current === client) clientRef.current = null;
+      scheduleReconnect(String(error));
     });
 
     client.on('close', () => {
@@ -1280,14 +1554,27 @@ export default function App() {
         clearInterval(nodeHeartbeatTimerRef.current);
         nodeHeartbeatTimerRef.current = null;
       }
-      setStatus('Connection closed');
-      clientRef.current = null;
+      if (clientRef.current === client) clientRef.current = null;
+      if (!nodeManualDisconnectRef.current) {
+        scheduleReconnect('socket closed');
+      } else {
+        setStatus('Disconnected from host');
+      }
     });
 
     clientRef.current = client;
   };
 
   const disconnectFromHost = () => {
+    nodeManualDisconnectRef.current = true;
+    nodeReconnectScheduledRef.current = false;
+    nodeReconnectAttemptRef.current = 0;
+
+    if (nodeReconnectTimerRef.current) {
+      clearTimeout(nodeReconnectTimerRef.current);
+      nodeReconnectTimerRef.current = null;
+    }
+
     if (clientRef.current) {
       clientRef.current.destroy();
       clientRef.current = null;
@@ -1317,6 +1604,7 @@ export default function App() {
       const safePosition = Math.max(0, positionMs + getPlaybackDelayCompensationMs());
       await PartyAudio.playCachedTrackFrom(trackId, trackName, safePosition);
       currentlyPlayingTrackRef.current = trackId;
+      startNodeDriftMonitor();
       addLog(`Catch-up playing ${trackName} from ${formatMs(safePosition)}`);
       setStatus(`Playing: ${trackName}`);
       setNowPlayingText(trackName);
@@ -1362,6 +1650,7 @@ export default function App() {
       try {
         await PartyAudio.playCachedTrack(trackId, trackName);
         currentlyPlayingTrackRef.current = trackId;
+        startNodeDriftMonitor();
         addLog(`Playing scheduled cached track: ${trackName}`);
         setStatus(`Playing: ${trackName}`);
       } catch (error) {
