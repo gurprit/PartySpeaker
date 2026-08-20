@@ -44,6 +44,7 @@ type Props = {
   onMetadataChange?: (metadata: TrackMetadata) => void;
   selectedTrackReady: boolean;
   playbackState: 'idle' | 'playing' | 'paused';
+  nowPlayingTrackId: string | null;
   onPlayPause: () => void;
   selectPreviousTrack: () => void;
   selectNextTrack: () => void;
@@ -67,6 +68,7 @@ export default function PlaylistPanel({
   onMetadataChange,
   selectedTrackReady,
   playbackState,
+  nowPlayingTrackId,
   onPlayPause,
   selectPreviousTrack,
   selectNextTrack,
@@ -103,6 +105,12 @@ export default function PlaylistPanel({
   ]);
 
   const selectedTrack = selectedTrackForMetadata;
+  const nowPlayingTrack = playlist.find(track => track.id === nowPlayingTrackId);
+  const nowPlayingMetadata = nowPlayingTrack
+    ? metadata.title && selectedTrack?.id === nowPlayingTrack.id
+      ? metadata
+      : {title: nowPlayingTrack.name.replace(/\.[^.]+$/, ''), artist: 'Unknown Artist', album: 'Unknown Album'}
+    : {title: '', artist: 'Unknown Artist', album: 'Unknown Album'};
   const selectedTransfer = selectedTrack
     ? trackTransferStatus[selectedTrack.id] || 0
     : 0;
@@ -136,7 +144,6 @@ export default function PlaylistPanel({
                 ]}
                 onPress={() => {
                   setSelectedTrackId(track.id);
-                  setCurrentTrackName(track.name);
                   addLog(`Selected track: ${track.name}`);
                   autoSyncAndTransfer(track, playlist, track.id);
                 }}>
@@ -186,11 +193,11 @@ export default function PlaylistPanel({
 
       <PartyCard style={localStyles.nowPlayingCard}>
         <NowPlayingArtwork
-          title={metadata.title || currentTrackName}
-          artworkUri={metadata.artworkUri}
+          title={nowPlayingTrack ? (nowPlayingMetadata.title || nowPlayingTrack.name) : 'Nothing playing'}
+          artworkUri={nowPlayingTrack && selectedTrack?.id === nowPlayingTrack.id ? metadata.artworkUri : undefined}
         />
 
-        <TrackInfo metadata={metadata} />
+        <TrackInfo metadata={nowPlayingTrack ? nowPlayingMetadata : {title: 'Nothing playing', artist: '', album: ''}} />
 
         <View style={localStyles.progressRow}>
           <Text style={localStyles.timeText}>{playbackPositionText}</Text>
@@ -247,11 +254,13 @@ export default function PlaylistPanel({
         <Text style={localStyles.readyText}>
           {playbackState === 'playing'
             ? 'Playing on all speakers'
-            : selectedTrackReady
-              ? 'Ready on all speakers'
-              : selectedTrack
-                ? 'Uploading to speakers...'
-                : 'Add and select a track'}
+            : selectedTrack
+              ? selectedTrackReady
+                ? 'Selected track ready'
+                : 'Selected track uploading...'
+              : playlist.length > 0
+                ? 'Playlist queued • select a track to play'
+                : 'Add tracks to build the playlist'}
         </Text>
 
         <Text style={localStyles.statusText}>{nowPlayingText}</Text>

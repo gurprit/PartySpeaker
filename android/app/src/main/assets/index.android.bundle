@@ -100374,9 +100374,13 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
   var TRANSFER_BATCH_SIZE = 4;
   var TRANSFER_BATCH_PAUSE_MS = 12;
   var TRACK_CACHE_TIMEOUT_MS = 120000;
-  var DRIFT_CHECK_INTERVAL_MS = 1500;
-  var DRIFT_HARD_RESYNC_MS = 350;
-  var DRIFT_LOG_THRESHOLD_MS = 150;
+  var DRIFT_CHECK_INTERVAL_MS = 750;
+  var DRIFT_INITIAL_CHECK_MS = 450;
+  var DRIFT_HARD_RESYNC_MS = 250;
+  var DRIFT_LOG_THRESHOLD_MS = 120;
+  var CLOCK_CALIBRATION_SAMPLES = 5;
+  var CLOCK_CALIBRATION_SPACING_MS = 90;
+  var CLOCK_CALIBRATION_SETTLE_MS = 650;
   var METADATA_HEAD_START_MS = 500;
   var TRANSFER_ACK_EVERY_CHUNKS = 8;
   var TRANSFER_ACK_TIMEOUT_MS = 8000;
@@ -100493,10 +100497,17 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       _useState52 = (0, _slicedToArray2.default)(_useState51, 2),
       playbackState = _useState52[0],
       setPlaybackState = _useState52[1];
-    var _useState53 = (0, _react.useState)(0),
+    var _useState53 = (0, _react.useState)(null),
       _useState54 = (0, _slicedToArray2.default)(_useState53, 2),
-      nodePlaybackDelayMs = _useState54[0],
-      setNodePlaybackDelayMs = _useState54[1];
+      nowPlayingTrackId = _useState54[0],
+      setNowPlayingTrackId = _useState54[1];
+    var _useState55 = (0, _react.useState)(0),
+      _useState56 = (0, _slicedToArray2.default)(_useState55, 2),
+      nodePlaybackDelayMs = _useState56[0],
+      setNodePlaybackDelayMs = _useState56[1];
+    var hostClockOffsetRef = (0, _react.useRef)(0);
+    var nodePlaybackDelayRef = (0, _react.useRef)(0);
+    var bestClockSampleRef = (0, _react.useRef)(null);
     var serverRef = (0, _react.useRef)(null);
     var transferServerRef = (0, _react.useRef)(null);
     var clientsRef = (0, _react.useRef)([]);
@@ -100528,6 +100539,12 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     (0, _react.useEffect)(() => {
       refreshHostAddress();
     }, []);
+    (0, _react.useEffect)(() => {
+      hostClockOffsetRef.current = hostClockOffsetMs;
+    }, [hostClockOffsetMs]);
+    (0, _react.useEffect)(() => {
+      nodePlaybackDelayRef.current = nodePlaybackDelayMs;
+    }, [nodePlaybackDelayMs]);
     (0, _react.useEffect)(() => {
       var subscription = _reactNative.AppState.addEventListener('change', nextState => {
         var previousState = appStateRef.current;
@@ -100627,9 +100644,9 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       var seconds = totalSeconds % 60;
       return `${minutes}:${String(seconds).padStart(2, '0')}`;
     };
-    var getNodeHostNowMs = () => Date.now() + hostClockOffsetMs;
+    var getNodeHostNowMs = () => Date.now() + hostClockOffsetRef.current;
     var getPlaybackDelayCompensationMs = () => {
-      return nodePlaybackDelayMs;
+      return nodePlaybackDelayRef.current;
     };
     var startPlaybackUiClock = (trackName, startedAtHostMs) => {
       if (playbackUiTimerRef.current) {
@@ -100648,9 +100665,8 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         nodeDriftTimerRef.current = null;
       }
     };
-    var startNodeDriftMonitor = () => {
-      stopNodeDriftMonitor();
-      nodeDriftTimerRef.current = setInterval(/*#__PURE__*/(0, _asyncToGenerator2.default)(function* () {
+    var correctNodePlaybackDrift = /*#__PURE__*/function () {
+      var _ref2 = (0, _asyncToGenerator2.default)(function* (label = 'periodic') {
         if (mode !== 'node' || appStateRef.current !== 'active') return;
         if (!nowPlayingRef.current || !currentlyPlayingTrackRef.current) return;
         try {
@@ -100659,16 +100675,31 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           var expectedPosition = Math.max(0, getNodeHostNowMs() - nowPlayingRef.current.startedAtHostMs + getPlaybackDelayCompensationMs());
           var driftMs = actualPosition - expectedPosition;
           if (Math.abs(driftMs) >= DRIFT_LOG_THRESHOLD_MS) {
-            addLog(`Playback drift: ${Math.round(driftMs)}ms`);
+            addLog(`Playback drift (${label}): ${Math.round(driftMs)}ms`);
           }
           if (Math.abs(driftMs) >= DRIFT_HARD_RESYNC_MS) {
             yield PartyAudio.seekCurrentPlayback(expectedPosition);
-            addLog(`Playback resynced by ${Math.round(-driftMs)}ms`);
+            addLog(`Playback resynced (${label}) by ${Math.round(-driftMs)}ms`);
           }
         } catch (error) {
           addLog(`Drift check skipped: ${String(error)}`);
         }
-      }), DRIFT_CHECK_INTERVAL_MS);
+      });
+      return function correctNodePlaybackDrift() {
+        return _ref2.apply(this, arguments);
+      };
+    }();
+    var startNodeDriftMonitor = () => {
+      stopNodeDriftMonitor();
+
+      // The first correction happens quickly after ExoPlayer actually starts.
+      // This catches device-specific decoder/startup latency before it becomes audible drift.
+      setTimeout(() => {
+        correctNodePlaybackDrift('initial');
+      }, DRIFT_INITIAL_CHECK_MS);
+      nodeDriftTimerRef.current = setInterval(() => {
+        correctNodePlaybackDrift();
+      }, DRIFT_CHECK_INTERVAL_MS);
     };
     var stopPlaybackUiClock = () => {
       if (playbackUiTimerRef.current) {
@@ -100684,6 +100715,29 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     var sendTimeSyncToNode = socket => {
       writeSocket(socket, `SYNC_TIME|${Date.now()}`);
     };
+    var calibrateNodeClocksBeforePlayback = /*#__PURE__*/function () {
+      var _ref3 = (0, _asyncToGenerator2.default)(function* () {
+        var liveSockets = clientsRef.current.filter(isSocketUsable);
+        if (liveSockets.length === 0) return;
+        addLog(`Clock calibration burst: ${CLOCK_CALIBRATION_SAMPLES} samples`);
+        var _loop = function* () {
+          var requestId = `${Date.now()}-${sample}-${Math.random()}`;
+          liveSockets.forEach(socket => {
+            writeSocket(socket, `SYNC_REQUEST|${requestId}`);
+          });
+          if (sample < CLOCK_CALIBRATION_SAMPLES - 1) {
+            yield new Promise(resolve => setTimeout(resolve, CLOCK_CALIBRATION_SPACING_MS));
+          }
+        };
+        for (var sample = 0; sample < CLOCK_CALIBRATION_SAMPLES; sample += 1) {
+          yield* _loop();
+        }
+        yield new Promise(resolve => setTimeout(resolve, CLOCK_CALIBRATION_SETTLE_MS));
+      });
+      return function calibrateNodeClocksBeforePlayback() {
+        return _ref3.apply(this, arguments);
+      };
+    }();
     var broadcastNowPlaying = () => {
       if (!nowPlayingRef.current || clientsRef.current.length === 0) {
         return;
@@ -100734,7 +100788,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       }
     };
     var addTrack = /*#__PURE__*/function () {
-      var _ref3 = (0, _asyncToGenerator2.default)(function* () {
+      var _ref4 = (0, _asyncToGenerator2.default)(function* () {
         try {
           var result = yield PartyAudio.pickAudioFile();
           var trackName = result.name || 'Selected audio';
@@ -100748,19 +100802,15 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           yield PartyAudio.registerTrackForTransfer(track.id, track.uri);
           var nextPlaylist = [...playlistRef.current, track];
           playlistRef.current = nextPlaylist;
-          selectedTrackIdRef.current = track.id;
           setPlaylist(nextPlaylist);
-          setSelectedTrackId(track.id);
-          setCurrentTrackName(track.name);
-          setCurrentTrackMetadata(metadata);
-          setPlaybackState('idle');
+          setPlaybackState(previous => previous);
           setTrackProgress(track.id, 0);
           setTransferProgress(0);
           setTransferProgressText(`Waiting for speakers: ${track.name}`);
           addLog(`Added track + metadata: ${track.name}`);
 
           // Metadata/playlist goes out first on the tiny control channel.
-          syncPlaylistSnapshotToNodes(nextPlaylist, track.id);
+          syncPlaylistSnapshotToNodes(nextPlaylist, selectedTrackIdRef.current);
 
           // Give the control message a moment to render, then ask nodes to download
           // the binary file natively. No Base64 crosses the JS bridge.
@@ -100770,7 +100820,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
       });
       return function addTrack() {
-        return _ref3.apply(this, arguments);
+        return _ref4.apply(this, arguments);
       };
     }();
     var removeSelectedTrack = () => {
@@ -100803,7 +100853,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       }, 100);
     };
     var playSelectedTrackLocal = /*#__PURE__*/function () {
-      var _ref4 = (0, _asyncToGenerator2.default)(function* () {
+      var _ref5 = (0, _asyncToGenerator2.default)(function* () {
         var selected = getSelectedTrack();
         if (!selected) {
           _reactNative.Alert.alert('No track selected', 'Add and select a track first.');
@@ -100819,11 +100869,11 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
       });
       return function playSelectedTrackLocal() {
-        return _ref4.apply(this, arguments);
+        return _ref5.apply(this, arguments);
       };
     }();
     var stopSelectedTrackLocal = /*#__PURE__*/function () {
-      var _ref5 = (0, _asyncToGenerator2.default)(function* () {
+      var _ref6 = (0, _asyncToGenerator2.default)(function* () {
         try {
           yield PartyAudio.stopAudioUri();
           addLog('Stopped local track');
@@ -100832,11 +100882,11 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
       });
       return function stopSelectedTrackLocal() {
-        return _ref5.apply(this, arguments);
+        return _ref6.apply(this, arguments);
       };
     }();
     var playLocalBeep = /*#__PURE__*/function () {
-      var _ref6 = (0, _asyncToGenerator2.default)(function* () {
+      var _ref7 = (0, _asyncToGenerator2.default)(function* () {
         try {
           yield PartyAudio.playBeep();
           addLog('Played local beep');
@@ -100846,11 +100896,11 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
       });
       return function playLocalBeep() {
-        return _ref6.apply(this, arguments);
+        return _ref7.apply(this, arguments);
       };
     }();
     var playLocalTestTone = /*#__PURE__*/function () {
-      var _ref7 = (0, _asyncToGenerator2.default)(function* () {
+      var _ref8 = (0, _asyncToGenerator2.default)(function* () {
         try {
           yield PartyAudio.playTestTone();
           addLog('Played local test tone');
@@ -100860,11 +100910,11 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
       });
       return function playLocalTestTone() {
-        return _ref7.apply(this, arguments);
+        return _ref8.apply(this, arguments);
       };
     }();
     var playLocalPartyClip = /*#__PURE__*/function () {
-      var _ref8 = (0, _asyncToGenerator2.default)(function* () {
+      var _ref9 = (0, _asyncToGenerator2.default)(function* () {
         try {
           yield PartyAudio.playPartyClip();
           addLog('Played local party clip');
@@ -100874,7 +100924,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
       });
       return function playLocalPartyClip() {
-        return _ref8.apply(this, arguments);
+        return _ref9.apply(this, arguments);
       };
     }();
     var playPartyClipAt = targetTimeMs => {
@@ -100904,7 +100954,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       }, delay);
     };
     var startHostServer = /*#__PURE__*/function () {
-      var _ref9 = (0, _asyncToGenerator2.default)(function* () {
+      var _ref0 = (0, _asyncToGenerator2.default)(function* () {
         yield refreshHostAddress();
         yield PartyAudio.startTrackTransferServer(TRANSFER_PORT);
         if (serverRef.current) {
@@ -100939,6 +100989,17 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                 addLog(`Node says: ${message}`);
               }
               if (message === "I'M_ALIVE") {
+                return;
+              }
+              if (message.startsWith('SYNC_PING|')) {
+                var parts = message.split('|');
+                var requestId = parts[1];
+                var clientSentMs = Number(parts[2]);
+                if (requestId && Number.isFinite(clientSentMs)) {
+                  var hostReceivedMs = Date.now();
+                  var hostSentMs = Date.now();
+                  writeSocket(socket, `SYNC_PONG|${requestId}|${clientSentMs}|${hostReceivedMs}|${hostSentMs}`);
+                }
                 return;
               }
               if (message === 'PLAYLIST_RECEIVED') {
@@ -100991,9 +101052,9 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                 return;
               }
               if (message.startsWith('TRACK_RECEIVED|')) {
-                var parts = message.split('|');
-                var trackId = parts[1];
-                var trackName = parts[2] || '';
+                var _parts = message.split('|');
+                var trackId = _parts[1];
+                var trackName = _parts[2] || '';
                 var _key = socket.remoteAddress || 'unknown';
                 if (!cachedTracksRef.current[_key]) {
                   cachedTracksRef.current[_key] = [];
@@ -101065,7 +101126,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         serverRef.current = server;
       });
       return function startHostServer() {
-        return _ref9.apply(this, arguments);
+        return _ref0.apply(this, arguments);
       };
     }();
     var startDiscoveryBroadcast = () => {
@@ -101108,7 +101169,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       addLog('Discovery broadcast stopped');
     };
     var scanSubnetForHost = /*#__PURE__*/function () {
-      var _ref0 = (0, _asyncToGenerator2.default)(function* () {
+      var _ref1 = (0, _asyncToGenerator2.default)(function* () {
         if (isScanning) {
           return;
         }
@@ -101116,7 +101177,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         setStatus('Scanning subnet for PartySpeaker host...');
         addLog(`Starting TCP subnet scan on ${subnetPrefix}.x`);
         var found = false;
-        var _loop = function* () {
+        var _loop2 = function* () {
           if (found) {
             return 1; // break
           }
@@ -101161,7 +101222,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           });
         };
         for (var i = 1; i <= 254; i++) {
-          if (yield* _loop()) break;
+          if (yield* _loop2()) break;
         }
         if (!found) {
           setStatus('No PartySpeaker host found');
@@ -101170,7 +101231,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         setIsScanning(false);
       });
       return function scanSubnetForHost() {
-        return _ref0.apply(this, arguments);
+        return _ref1.apply(this, arguments);
       };
     }();
     var stopHostServer = () => {
@@ -101224,8 +101285,8 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       var safeIndex = currentIndex >= 0 ? currentIndex : 0;
       var nextIndex = (safeIndex + offset + playlist.length) % playlist.length;
       var nextTrack = playlist[nextIndex];
+      selectedTrackIdRef.current = nextTrack.id;
       setSelectedTrackId(nextTrack.id);
-      setCurrentTrackName(nextTrack.name);
       addLog(`Selected track: ${nextTrack.name}`);
       autoSyncAndTransfer(nextTrack, playlist, nextTrack.id);
       setTimeout(() => {
@@ -101243,7 +101304,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       });
     };
     var waitForTrackCachedOnAllNodes = /*#__PURE__*/function () {
-      var _ref1 = (0, _asyncToGenerator2.default)(function* (track, timeoutMs = TRACK_CACHE_TIMEOUT_MS) {
+      var _ref10 = (0, _asyncToGenerator2.default)(function* (track, timeoutMs = TRACK_CACHE_TIMEOUT_MS) {
         var startedAt = Date.now();
         while (!isTrackCachedOnAllNodes(track.id)) {
           var cachedCount = clientsRef.current.filter(socket => {
@@ -101258,11 +101319,11 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
       });
       return function waitForTrackCachedOnAllNodes(_x) {
-        return _ref1.apply(this, arguments);
+        return _ref10.apply(this, arguments);
       };
     }();
     var playSelectedTrackOnAllSpeakers = /*#__PURE__*/function () {
-      var _ref10 = (0, _asyncToGenerator2.default)(function* (trackOverride) {
+      var _ref11 = (0, _asyncToGenerator2.default)(function* (trackOverride) {
         var looksLikeTrack = trackOverride && typeof trackOverride === 'object' && typeof trackOverride.id === 'string' && typeof trackOverride.name === 'string';
         var selected = looksLikeTrack ? trackOverride : getSelectedTrack();
         if (!selected) {
@@ -101285,6 +101346,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           _reactNative.Alert.alert('Track still downloading', message);
           return;
         }
+        yield calibrateNodeClocksBeforePlayback();
         var targetTimeMs = Date.now() + START_BUFFER_MS;
         var payload = {
           id: selected.id,
@@ -101297,6 +101359,9 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           trackName: selected.name,
           startedAtHostMs: targetTimeMs
         };
+        setNowPlayingTrackId(selected.id);
+        setCurrentTrackName(selected.name);
+        if (selected.metadata) setCurrentTrackMetadata(selected.metadata);
         clientsRef.current.forEach(socket => {
           sendTimeSyncToNode(socket);
           writeSocket(socket, `PLAY_TRACK_AT|${JSON.stringify(payload)}`);
@@ -101311,11 +101376,11 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         setStatus(`Playing on all speakers in ${Math.round(START_BUFFER_MS / 1000)}s`);
       });
       return function playSelectedTrackOnAllSpeakers(_x2) {
-        return _ref10.apply(this, arguments);
+        return _ref11.apply(this, arguments);
       };
     }();
     var _transferSelectedTrackToNodes = /*#__PURE__*/function () {
-      var _ref11 = (0, _asyncToGenerator2.default)(function* (trackOverride) {
+      var _ref12 = (0, _asyncToGenerator2.default)(function* (trackOverride) {
         var selected = trackOverride || getLatestSelectedTrack();
         if (!selected || clientsRef.current.length === 0) return;
         var liveSockets = clientsRef.current.filter(isSocketUsable);
@@ -101364,7 +101429,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         addLog(`Native download requested: ${selected.name}`);
       });
       return function transferSelectedTrackToNodes(_x3) {
-        return _ref11.apply(this, arguments);
+        return _ref12.apply(this, arguments);
       };
     }();
     var syncPlaylistSnapshotToNodes = (tracksSnapshot, selectedIdSnapshot) => {
@@ -101491,7 +101556,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }, 5000);
       });
       var handleHostMessage = /*#__PURE__*/function () {
-        var _ref12 = (0, _asyncToGenerator2.default)(function* (message, responseSocket = clientRef.current) {
+        var _ref13 = (0, _asyncToGenerator2.default)(function* (message, responseSocket = clientRef.current) {
           var isTransferChunk = message.startsWith('TRACK_TRANSFER_CHUNK|');
           if (!isTransferChunk) {
             setLastMessage(message);
@@ -101520,10 +101585,40 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
             }
             return;
           }
+          if (message.startsWith('SYNC_REQUEST|')) {
+            var requestId = message.split('|')[1];
+            if (requestId) {
+              writeSocket(client, `SYNC_PING|${requestId}|${Date.now()}`);
+            }
+            return;
+          }
+          if (message.startsWith('SYNC_PONG|')) {
+            var parts = message.split('|');
+            var clientSentMs = Number(parts[2]);
+            var hostReceivedMs = Number(parts[3]);
+            var hostSentMs = Number(parts[4]);
+            var clientReceivedMs = Date.now();
+            if ([clientSentMs, hostReceivedMs, hostSentMs].every(Number.isFinite)) {
+              var rttMs = Math.max(0, clientReceivedMs - clientSentMs - (hostSentMs - hostReceivedMs));
+              var offsetMs = Math.round((hostReceivedMs - clientSentMs + (hostSentMs - clientReceivedMs)) / 2);
+              var best = bestClockSampleRef.current;
+              if (!best || rttMs < best.rttMs) {
+                bestClockSampleRef.current = {
+                  rttMs,
+                  offsetMs
+                };
+                hostClockOffsetRef.current = offsetMs;
+                setHostClockOffsetMs(offsetMs);
+                addLog(`Clock calibrated: ${offsetMs}ms offset, ${rttMs}ms RTT`);
+              }
+            }
+            return;
+          }
           if (message.startsWith('SYNC_TIME|')) {
             var hostNow = Number(message.split('|')[1]);
-            if (!Number.isNaN(hostNow)) {
+            if (!Number.isNaN(hostNow) && !bestClockSampleRef.current) {
               var offset = hostNow - Date.now();
+              hostClockOffsetRef.current = offset;
               setHostClockOffsetMs(offset);
               addLog(`Clock sync offset: ${offset}ms`);
             }
@@ -101547,6 +101642,8 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
                   trackName: _payload2.trackName,
                   startedAtHostMs: _payload2.startedAtHostMs
                 };
+                setNowPlayingTrackId(_payload2.trackId);
+                setCurrentTrackName(_payload2.trackName);
                 startPlaybackUiClock(_payload2.trackName, _payload2.startedAtHostMs);
                 var alreadyPlayingThisTrack = currentlyPlayingTrackRef.current === _payload2.trackId;
                 if (!alreadyPlayingThisTrack) {
@@ -101601,9 +101698,8 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
               setPlaylist(syncedTracks);
               setSelectedTrackId(_payload3.selectedTrackId || null);
               var selected = syncedTracks.find(track => track.id === _payload3.selectedTrackId);
-              setCurrentTrackName(selected ? selected.name : 'None');
-              if (selected?.metadata) {
-                setCurrentTrackMetadata(selected.metadata);
+              if (selected?.metadata && !nowPlayingRef.current) {
+                // Keep queued/selected metadata separate from the Now Playing identity.
               }
               writeSocket(client, 'PLAYLIST_RECEIVED');
               addLog(`Synced playlist received: ${syncedTracks.length} track(s)`);
@@ -101625,10 +101721,10 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
             }
           }
           if (message.startsWith('TRACK_TRANSFER_CHUNK|')) {
-            var parts = message.split('|');
-            var trackId = parts[1];
-            var index = Number(parts[2]);
-            var chunk = parts.slice(3).join('|');
+            var _parts2 = message.split('|');
+            var trackId = _parts2[1];
+            var index = Number(_parts2[2]);
+            var chunk = _parts2.slice(3).join('|');
             var buffer = transferBuffersRef.current[trackId];
             if (buffer && !Number.isNaN(index)) {
               buffer.chunks[index] = chunk;
@@ -101698,8 +101794,8 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
             }
           }
           if (message.startsWith('PLAY_CLIP_AT|')) {
-            var _parts = message.split('|');
-            var targetTimeMs = Number(_parts[1]);
+            var _parts3 = message.split('|');
+            var targetTimeMs = Number(_parts3[1]);
             if (!Number.isNaN(targetTimeMs)) {
               playPartyClipAt(targetTimeMs);
               writeSocket(client, 'CLIP_SCHEDULED');
@@ -101707,7 +101803,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
           }
         });
         return function handleHostMessage(_x4) {
-          return _ref12.apply(this, arguments);
+          return _ref13.apply(this, arguments);
         };
       }();
       client.on('data', data => {
@@ -101787,7 +101883,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       addLog("Sent I'M_ALIVE to host");
     };
     var playCachedTrackFromPosition = /*#__PURE__*/function () {
-      var _ref13 = (0, _asyncToGenerator2.default)(function* (trackId, trackName, positionMs) {
+      var _ref14 = (0, _asyncToGenerator2.default)(function* (trackId, trackName, positionMs) {
         try {
           var safePosition = Math.max(0, positionMs + getPlaybackDelayCompensationMs());
           yield PartyAudio.playCachedTrackFrom(trackId, trackName, safePosition);
@@ -101802,7 +101898,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
       });
       return function playCachedTrackFromPosition(_x5, _x6, _x7) {
-        return _ref13.apply(this, arguments);
+        return _ref14.apply(this, arguments);
       };
     }();
     var playCachedTrackAt = (trackId, trackName, targetTimeMs) => {
@@ -101842,7 +101938,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       }), delay);
     };
     var playCachedSelectedTrack = /*#__PURE__*/function () {
-      var _ref15 = (0, _asyncToGenerator2.default)(function* () {
+      var _ref16 = (0, _asyncToGenerator2.default)(function* () {
         var selected = getSelectedTrack();
         if (!selected) {
           _reactNative.Alert.alert('No cached track selected', 'Sync the playlist and select a track first.');
@@ -101858,7 +101954,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }
       });
       return function playCachedSelectedTrack() {
-        return _ref15.apply(this, arguments);
+        return _ref16.apply(this, arguments);
       };
     }();
     var adjustNodeDelay = amount => {
@@ -101976,6 +102072,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       onMetadataChange: setCurrentTrackMetadata,
       selectedTrackReady: selectedTrackReadyForPlayback,
       playbackState: playbackState,
+      nowPlayingTrackId: nowPlayingTrackId,
       onPlayPause: () => {
         if (playbackState === 'playing') {
           pauseAllSpeakers();
@@ -102943,6 +103040,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
     onMetadataChange,
     selectedTrackReady,
     playbackState,
+    nowPlayingTrackId,
     onPlayPause,
     selectPreviousTrack,
     selectNextTrack
@@ -102969,6 +103067,16 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
       };
     }, [currentTrackName, selectedTrackForMetadata?.name, selectedTrackForMetadata?.uri, onMetadataChange]);
     var selectedTrack = selectedTrackForMetadata;
+    var nowPlayingTrack = playlist.find(track => track.id === nowPlayingTrackId);
+    var nowPlayingMetadata = nowPlayingTrack ? metadata.title && selectedTrack?.id === nowPlayingTrack.id ? metadata : {
+      title: nowPlayingTrack.name.replace(/\.[^.]+$/, ''),
+      artist: 'Unknown Artist',
+      album: 'Unknown Album'
+    } : {
+      title: '',
+      artist: 'Unknown Artist',
+      album: 'Unknown Album'
+    };
     var selectedTransfer = selectedTrack ? trackTransferStatus[selectedTrack.id] || 0 : 0;
     return /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
       style: localStyles.container,
@@ -102995,7 +103103,6 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
             style: [localStyles.trackRow, selected ? localStyles.trackRowSelected : null],
             onPress: () => {
               setSelectedTrackId(track.id);
-              setCurrentTrackName(track.name);
               addLog(`Selected track: ${track.name}`);
               autoSyncAndTransfer(track, playlist, track.id);
             },
@@ -103045,10 +103152,14 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
         }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_PartyCard.default, {
           style: localStyles.nowPlayingCard,
           children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_NowPlayingArtwork.default, {
-            title: metadata.title || currentTrackName,
-            artworkUri: metadata.artworkUri
+            title: nowPlayingTrack ? nowPlayingMetadata.title || nowPlayingTrack.name : 'Nothing playing',
+            artworkUri: nowPlayingTrack && selectedTrack?.id === nowPlayingTrack.id ? metadata.artworkUri : undefined
           }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_TrackInfo.default, {
-            metadata: metadata
+            metadata: nowPlayingTrack ? nowPlayingMetadata : {
+              title: 'Nothing playing',
+              artist: '',
+              album: ''
+            }
           }), /*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.View, {
             style: localStyles.progressRow,
             children: [/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
@@ -103099,7 +103210,7 @@ __d(function (global, _$$_REQUIRE, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, e
             })]
           }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
             style: localStyles.readyText,
-            children: playbackState === 'playing' ? 'Playing on all speakers' : selectedTrackReady ? 'Ready on all speakers' : selectedTrack ? 'Uploading to speakers...' : 'Add and select a track'
+            children: playbackState === 'playing' ? 'Playing on all speakers' : selectedTrack ? selectedTrackReady ? 'Selected track ready' : 'Selected track uploading...' : playlist.length > 0 ? 'Playlist queued • select a track to play' : 'Add tracks to build the playlist'
           }), /*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, {
             style: localStyles.statusText,
             children: nowPlayingText
