@@ -40,7 +40,23 @@ const startIndex = source.indexOf(startMarker);
 const endIndex = source.indexOf(endMarker, startIndex);
 if (startIndex < 0 || endIndex < 0) throw new Error('Patch failed: drift monitor block');
 
-const replacement = `  const startNodeDriftMonitor = () => {\n    stopNodeDriftMonitor();\n\n    [DRIFT_INITIAL_CHECK_MS, 420, 850, 1400].forEach((delayMs, index) => {\n      setTimeout(() => {\n        correctNodePlaybackDrift(\`startup-${index + 1}\`, DRIFT_FIRST_PLAY_RESYNC_MS);\n      }, delayMs);\n    });\n\n    nodeDriftTimerRef.current = setInterval(() => {\n      correctNodePlaybackDrift('periodic', DRIFT_HARD_RESYNC_MS);\n    }, DRIFT_CHECK_INTERVAL_MS);\n  };\n\n`;
+const replacement = [
+  '  const startNodeDriftMonitor = () => {',
+  '    stopNodeDriftMonitor();',
+  '',
+  '    [DRIFT_INITIAL_CHECK_MS, 420, 850, 1400].forEach((delayMs, index) => {',
+  '      setTimeout(() => {',
+  '        correctNodePlaybackDrift(`startup-${index + 1}`, DRIFT_FIRST_PLAY_RESYNC_MS);',
+  '      }, delayMs);',
+  '    });',
+  '',
+  '    nodeDriftTimerRef.current = setInterval(() => {',
+  "      correctNodePlaybackDrift('periodic', DRIFT_HARD_RESYNC_MS);",
+  '    }, DRIFT_CHECK_INTERVAL_MS);',
+  '  };',
+  '',
+  '',
+].join('\n');
 
 source = source.slice(0, startIndex) + replacement + source.slice(endIndex);
 
