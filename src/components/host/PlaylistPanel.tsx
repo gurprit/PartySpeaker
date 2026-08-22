@@ -39,7 +39,8 @@ type Props = {
   trackTransferStatus: Record<string, number | undefined>;
   addTrack: () => void;
   addFolder: () => void;
-  removeSelectedTrack: () => void;
+  removeTrackById: (trackId: string) => void;
+  moveTrack: (trackId: string, direction: -1 | 1) => void;
   autoSyncAndTransfer: (
     track?: Track,
     playlistSnapshot?: Track[],
@@ -70,7 +71,8 @@ export default function PlaylistPanel({
   trackTransferStatus,
   addTrack,
   addFolder,
-  removeSelectedTrack,
+  removeTrackById,
+  moveTrack,
   autoSyncAndTransfer,
   onTrackSelected,
   onMetadataChange,
@@ -166,33 +168,63 @@ export default function PlaylistPanel({
                   addLog(`Selected track: ${track.name}`);
                   onTrackSelected(track);
                 }}>
-                <Text style={[localStyles.trackIndex, selected ? localStyles.trackIndexSelected : null]}>{index + 1}</Text>
+                <View style={localStyles.trackMainRow}>
+                  <Text style={[localStyles.trackIndex, selected ? localStyles.trackIndexSelected : null]}>{index + 1}</Text>
 
-                <View style={localStyles.trackArtworkMini}>
-                  {track.metadata?.artworkUri ? (
-                    <Image
-                      source={{uri: track.metadata.artworkUri}}
-                      style={localStyles.trackArtworkImage}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <Text style={[localStyles.trackArtworkText, selected ? localStyles.trackArtworkTextSelected : null]}>
-                      {track.name.trim()[0]?.toUpperCase() || '♪'}
+                  <View style={localStyles.trackArtworkMini}>
+                    {track.metadata?.artworkUri ? (
+                      <Image
+                        source={{uri: track.metadata.artworkUri}}
+                        style={localStyles.trackArtworkImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <Text style={[localStyles.trackArtworkText, selected ? localStyles.trackArtworkTextSelected : null]}>
+                        {track.name.trim()[0]?.toUpperCase() || '♪'}
+                      </Text>
+                    )}
+                  </View>
+
+                  <View style={localStyles.trackTextWrap}>
+                    <Text style={[localStyles.trackTitle, selected ? localStyles.trackTitleSelected : null]} numberOfLines={1}>
+                      {track.name.replace(/\.[^.]+$/, '')}
                     </Text>
-                  )}
+
+                    <Text style={[localStyles.trackMeta, selected ? localStyles.trackMetaSelected : null]} numberOfLines={1}>
+                      {progress >= 100 ? 'Cached on speakers' : `Loading ${progress}%`}
+                    </Text>
+                  </View>
+
                 </View>
 
-                <View style={localStyles.trackTextWrap}>
-                  <Text style={[localStyles.trackTitle, selected ? localStyles.trackTitleSelected : null]} numberOfLines={1}>
-                    {track.name.replace(/\.[^.]+$/, '')}
-                  </Text>
-
-                  <Text style={[localStyles.trackMeta, selected ? localStyles.trackMetaSelected : null]} numberOfLines={1}>
-                    {progress >= 100 ? 'Cached on speakers' : `Loading ${progress}%`}
-                  </Text>
+                <View style={localStyles.rowActions}>
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    disabled={index === 0}
+                    onPress={event => {
+                      event.stopPropagation();
+                      moveTrack(track.id, -1);
+                    }}>
+                    <Text style={[localStyles.rowActionIcon, index === 0 ? localStyles.rowActionDisabled : null, selected ? localStyles.rowActionSelected : null]}>↑</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    disabled={index === playlist.length - 1}
+                    onPress={event => {
+                      event.stopPropagation();
+                      moveTrack(track.id, 1);
+                    }}>
+                    <Text style={[localStyles.rowActionIcon, index === playlist.length - 1 ? localStyles.rowActionDisabled : null, selected ? localStyles.rowActionSelected : null]}>↓</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={event => {
+                      event.stopPropagation();
+                      removeTrackById(track.id);
+                    }}>
+                    <Text style={[localStyles.binIcon, selected ? localStyles.rowActionSelected : null]}>⌫</Text>
+                  </TouchableOpacity>
                 </View>
-
-                <Text style={[localStyles.moreIcon, selected ? localStyles.moreIconSelected : null]}>⋮</Text>
               </TouchableOpacity>
             );
           })
@@ -201,26 +233,20 @@ export default function PlaylistPanel({
 
       <View style={localStyles.actionsRow}>
         <PartyButton
-          title="＋ Add File"
+          title="＋ Track"
           onPress={addTrack}
           variant="secondary"
           style={localStyles.actionButton}
         />
 
         <PartyButton
-          title="▣ Add Folder"
+          title="＋ Folder"
           onPress={addFolder}
           variant="secondary"
           style={localStyles.actionButton}
         />
       </View>
 
-      <PartyButton
-        title="⌫ Remove Selected"
-        onPress={removeSelectedTrack}
-        variant="secondary"
-        style={localStyles.removeButton}
-      />
 
       <View style={localStyles.nowPlayingSpacing}>
       <SectionLabel>Now Playing</SectionLabel>
@@ -406,13 +432,16 @@ const localStyles = StyleSheet.create({
     textAlign: 'center',
   },
   trackRow: {
-    minHeight: 88,
+    minHeight: 104,
     borderRadius: 18,
     paddingHorizontal: 18,
     paddingVertical: 14,
     backgroundColor: partyTheme.card,
     borderColor: partyTheme.border,
     borderWidth: 1,
+    gap: 10,
+  },
+  trackMainRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
@@ -469,13 +498,32 @@ const localStyles = StyleSheet.create({
   trackMetaSelected: {
     color: 'rgba(0,0,0,0.55)',
   },
-  moreIcon: {
-    color: partyTheme.muted,
-    fontSize: 28,
-    fontWeight: '900',
+  rowActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 18,
+    paddingRight: 2,
   },
-  moreIconSelected: {
-    color: 'rgba(0,0,0,0.55)',
+  rowActionIcon: {
+    color: partyTheme.muted,
+    fontSize: 22,
+    fontWeight: '900',
+    minWidth: 30,
+    textAlign: 'center',
+  },
+  binIcon: {
+    color: partyTheme.muted,
+    fontSize: 22,
+    fontWeight: '900',
+    minWidth: 30,
+    textAlign: 'center',
+  },
+  rowActionSelected: {
+    color: 'rgba(0,0,0,0.62)',
+  },
+  rowActionDisabled: {
+    opacity: 0.22,
   },
   actionsRow: {
     flexDirection: 'row',
@@ -485,9 +533,5 @@ const localStyles = StyleSheet.create({
   actionButton: {
     flex: 1,
     minHeight: 72,
-  },
-  removeButton: {
-    width: '100%',
-    minHeight: 64,
   },
 });
