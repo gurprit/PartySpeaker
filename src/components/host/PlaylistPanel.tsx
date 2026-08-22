@@ -222,7 +222,7 @@ export default function PlaylistPanel({
                       event.stopPropagation();
                       removeTrackById(track.id);
                     }}>
-                    <Text style={[localStyles.binIcon, selected ? localStyles.rowActionSelected : null]}>⌫</Text>
+                    <Text style={[localStyles.binIcon, selected ? localStyles.rowActionSelected : null]}>🗑</Text>
                   </TouchableOpacity>
                 </View>
               </TouchableOpacity>

@@ -149,6 +149,9 @@ export default function App() {
   const pendingScheduledPlaybackRef = useRef<{trackId: string; targetTimeMs: number} | null>(null);
   const strictPrepareTransactionRef = useRef<string | null>(null);
   const strictPreparedNodesRef = useRef<Set<string>>(new Set());
+  const standbyTrackIdRef = useRef<string | null>(null);
+  const standbyPreparedNodesRef = useRef<Set<string>>(new Set());
+  const standbyHostReadyRef = useRef(false);
   const nodePrepareTransactionRef = useRef<string | null>(null);
   const nodePrimedTransactionRef = useRef<string | null>(null);
   const preloadQueueRef = useRef<Track[]>([]);
@@ -917,6 +920,16 @@ export default function App() {
             return;
           }
 
+          if (message.startsWith('NEXT_TRACK_PREWARMED|')) {
+            const [, trackId] = message.split('|');
+            if (trackId && standbyTrackIdRef.current === trackId) {
+              const key = socket.remoteAddress || 'unknown';
+              standbyPreparedNodesRef.current.add(key);
+              addLog(`Next track prewarmed: ${key} (${standbyPreparedNodesRef.current.size}/${clientsRef.current.filter(isSocketUsable).length})`);
+            }
+            return;
+          }
+
           if (message.startsWith('TRACK_PRIMED|')) {
             const [, transactionId, trackId] = message.split('|');
             if (transactionId && trackId && strictPrepareTransactionRef.current === transactionId) {
@@ -1311,6 +1324,34 @@ export default function App() {
     }
   };
 
+  const prewarmFollowingTrack = async (currentTrackId: string) => {
+    const currentIndex = playlistRef.current.findIndex(track => track.id === currentTrackId);
+    const nextTrack = currentIndex >= 0 ? playlistRef.current[currentIndex + 1] : null;
+    if (!nextTrack || !isTrackCachedOnAllNodes(nextTrack.id)) {
+      standbyTrackIdRef.current = null;
+      standbyPreparedNodesRef.current = new Set();
+      standbyHostReadyRef.current = false;
+      return;
+    }
+
+    standbyTrackIdRef.current = nextTrack.id;
+    standbyPreparedNodesRef.current = new Set();
+    standbyHostReadyRef.current = false;
+    const liveSockets = clientsRef.current.filter(isSocketUsable);
+    const payload = {id: nextTrack.id, name: nextTrack.name};
+    liveSockets.forEach(socket => writeSocket(socket, `PREWARM_NEXT_TRACK|${JSON.stringify(payload)}`));
+
+    try {
+      await PartyAudio.primeStandbyAudioUri(nextTrack.uri);
+      if (standbyTrackIdRef.current === nextTrack.id) {
+        standbyHostReadyRef.current = true;
+        addLog(`Host standby ready: ${nextTrack.name}`);
+      }
+    } catch (error) {
+      addLog(`Host standby prewarm skipped: ${String(error)}`);
+    }
+  };
+
   const playSelectedTrackOnAllSpeakers = async (trackOverride?: Track) => {
     const looksLikeTrack =
       trackOverride &&
@@ -1340,6 +1381,41 @@ export default function App() {
       addLog(message);
       setStatus(message);
       Alert.alert('Track still downloading', message);
+      return;
+    }
+
+    const liveSocketsForStandby = clientsRef.current.filter(isSocketUsable);
+    const standbyReadyEverywhere =
+      standbyTrackIdRef.current === selected.id &&
+      standbyHostReadyRef.current &&
+      liveSocketsForStandby.length > 0 &&
+      liveSocketsForStandby.every(socket =>
+        standbyPreparedNodesRef.current.has(socket.remoteAddress || 'unknown'),
+      );
+
+    if (standbyReadyEverywhere) {
+      if (nowPlayingBroadcastTimerRef.current) {
+        clearInterval(nowPlayingBroadcastTimerRef.current);
+        nowPlayingBroadcastTimerRef.current = null;
+      }
+      await calibrateNodeClocksBeforePlayback();
+      const targetTimeMs = Date.now() + 850;
+      const payload = {id: selected.id, name: selected.name, targetTimeMs};
+      nowPlayingRef.current = {trackId: selected.id, trackName: selected.name, startedAtHostMs: targetTimeMs};
+      setNowPlayingTrackId(selected.id);
+      setCurrentTrackName(selected.name);
+      if (selected.metadata) setCurrentTrackMetadata(selected.metadata);
+      liveSocketsForStandby.forEach(socket => writeSocket(socket, `START_STANDBY_AT|${JSON.stringify(payload)}`));
+      await PartyAudio.startStandbyTrackAt(targetTimeMs);
+      standbyTrackIdRef.current = null;
+      standbyPreparedNodesRef.current = new Set();
+      standbyHostReadyRef.current = false;
+      nowPlayingBroadcastTimerRef.current = setInterval(broadcastNowPlaying, 3000);
+      startPlaybackUiClock(selected.name, targetTimeMs);
+      setPlaybackState('playing');
+      setStatus('Next track prewarmed • synchronized start scheduled');
+      addLog(`Fast standby start: ${selected.name}`);
+      setTimeout(() => prewarmFollowingTrack(selected.id), 1200);
       return;
     }
 
@@ -1468,6 +1544,7 @@ export default function App() {
     setPlaybackState('playing');
     addLog(`Strict synchronized start: ${selected.name}`);
     setStatus('All speakers ready • synchronized start scheduled');
+    setTimeout(() => prewarmFollowingTrack(selected.id), 1200);
   };
 
   const transferSelectedTrackToNodes = async (trackOverride?: Track) => {
@@ -1935,6 +2012,37 @@ export default function App() {
             addLog(`Save transferred track error: ${String(error)}`);
           }
         }
+      }
+
+      if (message.startsWith('PREWARM_NEXT_TRACK|')) {
+        try {
+          const payload = JSON.parse(message.replace('PREWARM_NEXT_TRACK|', ''));
+          if (!payload.id || !payload.name) return;
+          await PartyAudio.primeStandbyCachedTrack(payload.id, payload.name);
+          writeSocket(clientRef.current || client, `NEXT_TRACK_PREWARMED|${payload.id}`);
+          addLog(`Standby track ready: ${payload.name}`);
+        } catch (error) {
+          addLog(`Standby prewarm skipped: ${String(error)}`);
+        }
+        return;
+      }
+
+      if (message.startsWith('START_STANDBY_AT|')) {
+        try {
+          const payload = JSON.parse(message.replace('START_STANDBY_AT|', ''));
+          if (!payload.id || !payload.name || !payload.targetTimeMs) return;
+          const localTargetTimeMs = Date.now() + Math.max(0, payload.targetTimeMs - getNodeHostNowMs()) + getPlaybackDelayCompensationMs();
+          nowPlayingRef.current = {trackId: payload.id, trackName: payload.name, startedAtHostMs: payload.targetTimeMs};
+          setNowPlayingTrackId(payload.id);
+          startPlaybackUiClock(payload.name, payload.targetTimeMs);
+          await PartyAudio.startStandbyTrackAt(localTargetTimeMs);
+          currentlyPlayingTrackRef.current = payload.id;
+          startNodeDriftMonitor();
+          setStatus(`Playing: ${payload.name}`);
+        } catch (error) {
+          addLog(`Standby start error: ${String(error)}`);
+        }
+        return;
       }
 
       if (message.startsWith('PREPARE_TRACK|')) {
