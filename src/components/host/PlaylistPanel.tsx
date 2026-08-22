@@ -28,6 +28,7 @@ type Props = {
   currentTrackName: string;
   nowPlayingText: string;
   playbackPositionText: string;
+  playbackPositionMs: number;
   transferProgressText: string;
   transferProgress: number;
   playlist: Track[];
@@ -37,12 +38,14 @@ type Props = {
   addLog: (message: string) => void;
   trackTransferStatus: Record<string, number | undefined>;
   addTrack: () => void;
+  addFolder: () => void;
   removeSelectedTrack: () => void;
   autoSyncAndTransfer: (
     track?: Track,
     playlistSnapshot?: Track[],
     selectedIdSnapshot?: string | null,
   ) => void;
+  onTrackSelected: (track: Track) => void;
   onMetadataChange?: (metadata: TrackMetadata) => void;
   selectedTrackReady: boolean;
   playbackState: 'idle' | 'playing' | 'paused';
@@ -56,6 +59,7 @@ export default function PlaylistPanel({
   currentTrackName,
   nowPlayingText,
   playbackPositionText,
+  playbackPositionMs,
   transferProgressText,
   transferProgress,
   playlist,
@@ -65,8 +69,10 @@ export default function PlaylistPanel({
   addLog,
   trackTransferStatus,
   addTrack,
+  addFolder,
   removeSelectedTrack,
   autoSyncAndTransfer,
+  onTrackSelected,
   onMetadataChange,
   selectedTrackReady,
   playbackState,
@@ -116,6 +122,18 @@ export default function PlaylistPanel({
   const selectedTransfer = selectedTrack
     ? trackTransferStatus[selectedTrack.id] || 0
     : 0;
+  const nowPlayingDurationMs = Number(nowPlayingTrack?.metadata?.durationMs || nowPlayingMetadata.durationMs || 0);
+  const playbackProgressPercent = nowPlayingDurationMs > 0
+    ? Math.max(0, Math.min(100, (playbackPositionMs / nowPlayingDurationMs) * 100))
+    : 0;
+
+  const formatDuration = (ms: number) => {
+    if (!ms || ms < 0) return '--:--';
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+  };
 
   return (
     <View style={localStyles.container}>
@@ -145,9 +163,8 @@ export default function PlaylistPanel({
                   selected ? localStyles.trackRowSelected : null,
                 ]}
                 onPress={() => {
-                  setSelectedTrackId(track.id);
                   addLog(`Selected track: ${track.name}`);
-                  autoSyncAndTransfer(track, playlist, track.id);
+                  onTrackSelected(track);
                 }}>
                 <Text style={[localStyles.trackIndex, selected ? localStyles.trackIndexSelected : null]}>{index + 1}</Text>
 
@@ -184,19 +201,26 @@ export default function PlaylistPanel({
 
       <View style={localStyles.actionsRow}>
         <PartyButton
-          title="＋ Add"
+          title="＋ Add File"
           onPress={addTrack}
           variant="secondary"
           style={localStyles.actionButton}
         />
 
         <PartyButton
-          title="⌫ Remove"
-          onPress={removeSelectedTrack}
+          title="▣ Add Folder"
+          onPress={addFolder}
           variant="secondary"
           style={localStyles.actionButton}
         />
       </View>
+
+      <PartyButton
+        title="⌫ Remove Selected"
+        onPress={removeSelectedTrack}
+        variant="secondary"
+        style={localStyles.removeButton}
+      />
 
       <View style={localStyles.nowPlayingSpacing}>
       <SectionLabel>Now Playing</SectionLabel>
@@ -217,13 +241,13 @@ export default function PlaylistPanel({
               style={[
                 localStyles.progressInner,
                 {
-                  width: `${Math.max(4, Math.min(100, transferProgress || selectedTransfer))}%`,
+                  width: `${playbackProgressPercent}%`,
                 },
               ]}
             />
           </View>
 
-          <Text style={localStyles.timeText}>--:--</Text>
+          <Text style={localStyles.timeText}>{formatDuration(nowPlayingDurationMs)}</Text>
         </View>
 
         <View style={localStyles.controlsRow}>
@@ -461,5 +485,9 @@ const localStyles = StyleSheet.create({
   actionButton: {
     flex: 1,
     minHeight: 72,
+  },
+  removeButton: {
+    width: '100%',
+    minHeight: 64,
   },
 });
