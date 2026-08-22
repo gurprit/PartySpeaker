@@ -577,7 +577,22 @@ class PartyAudioModule(
                         promise.resolve(true)
                     }
                 }
+
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    if (!settled) {
+                        settled = true
+                        promise.reject("PRIME_CACHED_TRACK_PLAYER_ERROR", error.message, error)
+                    }
+                }
             })
+
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (!settled && currentExoPlayer === player) {
+                    settled = true
+                    promise.reject("PRIME_CACHED_TRACK_TIMEOUT", "Player did not become ready within 15000ms")
+                }
+            }, 15000L)
+
             player.prepare()
         } catch (error: Exception) {
             promise.reject("PRIME_CACHED_TRACK_ERROR", error)

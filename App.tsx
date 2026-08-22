@@ -149,6 +149,8 @@ export default function App() {
   const pendingScheduledPlaybackRef = useRef<{trackId: string; targetTimeMs: number} | null>(null);
   const strictPrepareTransactionRef = useRef<string | null>(null);
   const strictPreparedNodesRef = useRef<Set<string>>(new Set());
+  const nodePrepareTransactionRef = useRef<string | null>(null);
+  const nodePrimedTransactionRef = useRef<string | null>(null);
   const preloadQueueRef = useRef<Track[]>([]);
   const preloadQueueRunningRef = useRef(false);
 
@@ -313,6 +315,8 @@ export default function App() {
     }
 
     setNowPlayingText(trackName);
+    setPlaybackPositionMs(0);
+    setPlaybackPositionText('0:00');
 
     playbackUiTimerRef.current = setInterval(() => {
       const hostNow = mode === 'host' ? Date.now() : getNodeHostNowMs();
@@ -889,6 +893,17 @@ export default function App() {
             return;
           }
 
+          if (message.startsWith('TRACK_PREPARE_FAILED|')) {
+            const [, transactionId, trackId, ...detailParts] = message.split('|');
+            if (transactionId && trackId && strictPrepareTransactionRef.current === transactionId) {
+              const key = socket.remoteAddress || 'unknown';
+              const detail = detailParts.join('|') || 'unknown error';
+              addLog(`Speaker prepare failed: ${key} • ${detail}`);
+              setStatus(`Retrying slow speaker: ${key}`);
+            }
+            return;
+          }
+
           if (message.startsWith('TRACK_PRIMED|')) {
             const [, transactionId, trackId] = message.split('|');
             if (transactionId && trackId && strictPrepareTransactionRef.current === transactionId) {
@@ -1170,7 +1185,7 @@ export default function App() {
     setStatus('Pause sent to all speakers');
   };
 
-  const selectTrackByOffset = (offset: number) => {
+  const selectTrackByOffset = async (offset: number) => {
     if (playlist.length === 0) {
       return;
     }
@@ -1183,11 +1198,21 @@ export default function App() {
     selectedTrackIdRef.current = nextTrack.id;
     setSelectedTrackId(nextTrack.id);
     addLog(`Selected track: ${nextTrack.name}`);
-    autoSyncAndTransfer(nextTrack, playlist, nextTrack.id);
+    syncPlaylistSnapshotToNodes(playlist, nextTrack.id);
 
-    setTimeout(() => {
-      playSelectedTrackOnAllSpeakers(nextTrack);
-    }, 1000);
+    if (!isTrackCachedOnAllNodes(nextTrack.id)) {
+      setStatus(`Preparing next track: ${nextTrack.name}`);
+      transferSelectedTrackToNodes(nextTrack);
+      try {
+        await waitForTrackCachedOnAllNodes(nextTrack);
+      } catch (error) {
+        addLog(`Next-track cache wait failed: ${String(error)}`);
+        setStatus('Next track could not be prepared on every speaker');
+        return;
+      }
+    }
+
+    await playSelectedTrackOnAllSpeakers(nextTrack);
   };
 
   useEffect(() => {
@@ -1198,7 +1223,16 @@ export default function App() {
 
     const current = playlistRef.current[currentIndex];
     const durationMs = Number(current.metadata?.durationMs || 0);
-    if (!durationMs || playbackPositionMs < durationMs - 350) return;
+    if (!durationMs) return;
+
+    const activeNowPlaying = nowPlayingRef.current;
+    if (!activeNowPlaying || activeNowPlaying.trackId !== current.id) return;
+
+    // startedAtHostMs may still be in the future while the strict readiness
+    // transaction is completing. Never interpret the previous track's UI
+    // position as this track reaching its end.
+    const authoritativePositionMs = Math.max(0, Date.now() - activeNowPlaying.startedAtHostMs);
+    if (authoritativePositionMs < durationMs - 350) return;
     if (autoAdvancedTrackRef.current === current.id) return;
 
     autoAdvancedTrackRef.current = current.id;
@@ -1216,12 +1250,23 @@ export default function App() {
     selectedTrackIdRef.current = nextTrack.id;
     setSelectedTrackId(nextTrack.id);
     syncPlaylistSnapshotToNodes(playlistRef.current, nextTrack.id);
-    setTimeout(() => playSelectedTrackOnAllSpeakers(nextTrack), 120);
-  }, [mode, playbackState, nowPlayingTrackId, playbackPositionMs]);
 
-  useEffect(() => {
-    if (nowPlayingTrackId) autoAdvancedTrackRef.current = null;
-  }, [nowPlayingTrackId]);
+    const advance = async () => {
+      if (!isTrackCachedOnAllNodes(nextTrack.id)) {
+        transferSelectedTrackToNodes(nextTrack);
+        try {
+          await waitForTrackCachedOnAllNodes(nextTrack);
+        } catch (error) {
+          addLog(`Auto-next cache wait failed: ${String(error)}`);
+          setStatus('Auto-next waiting for speakers failed');
+          return;
+        }
+      }
+      await playSelectedTrackOnAllSpeakers(nextTrack);
+    };
+
+    advance();
+  }, [mode, playbackState, nowPlayingTrackId, playbackPositionMs]);
 
   const isTrackCachedOnAllNodes = (trackId: string) => {
     const liveSockets = clientsRef.current.filter(isSocketUsable);
@@ -1285,6 +1330,14 @@ export default function App() {
       return;
     }
 
+    // Stop the previous track heartbeat before priming a replacement. Otherwise
+    // a late NOW_PLAYING from the old song can cause a node to restore/catch-up
+    // the old player while the new track is being prepared.
+    if (nowPlayingBroadcastTimerRef.current) {
+      clearInterval(nowPlayingBroadcastTimerRef.current);
+      nowPlayingBroadcastTimerRef.current = null;
+    }
+
     await calibrateNodeClocksBeforePlayback();
 
     const liveSockets = clientsRef.current.filter(isSocketUsable);
@@ -1322,7 +1375,8 @@ export default function App() {
     }
 
     const prepareStartedAt = Date.now();
-    const PREPARE_TIMEOUT_MS = 12000;
+    const PREPARE_TIMEOUT_MS = 45000;
+    let lastPrepareRetryAt = prepareStartedAt;
 
     while (true) {
       const currentSockets = clientsRef.current.filter(isSocketUsable);
@@ -1334,7 +1388,19 @@ export default function App() {
 
       if (allReady) break;
 
-      if (Date.now() - prepareStartedAt > PREPARE_TIMEOUT_MS) {
+      const now = Date.now();
+      if (now - lastPrepareRetryAt >= 1500) {
+        currentSockets.forEach(socket => {
+          const key = socket.remoteAddress || 'unknown';
+          if (!strictPreparedNodesRef.current.has(key)) {
+            writeSocket(socket, `PREPARE_TRACK|${JSON.stringify(preparePayload)}`);
+          }
+        });
+        lastPrepareRetryAt = now;
+        addLog('Retried prepare on speakers still waiting');
+      }
+
+      if (now - prepareStartedAt > PREPARE_TIMEOUT_MS) {
         const readyCount = currentSockets.filter(socket =>
           strictPreparedNodesRef.current.has(socket.remoteAddress || 'unknown'),
         ).length;
@@ -1861,23 +1927,62 @@ export default function App() {
       }
 
       if (message.startsWith('PREPARE_TRACK|')) {
+        let preparePayload: any = null;
         try {
-          const payload = JSON.parse(message.replace('PREPARE_TRACK|', ''));
+          preparePayload = JSON.parse(message.replace('PREPARE_TRACK|', ''));
+          const payload = preparePayload;
           if (!payload.id || !payload.name || !payload.transactionId) return;
 
+          // PREPARE_TRACK may be retried by the host if an acknowledgement is slow
+          // or lost. Never restart ExoPlayer for the same transaction: doing so
+          // repeatedly replaces the player while a slower phone is still decoding
+          // and can prevent that phone from ever reaching STATE_READY.
+          if (nodePrepareTransactionRef.current === payload.transactionId) {
+            if (nodePrimedTransactionRef.current === payload.transactionId) {
+              writeSocket(
+                clientRef.current || client,
+                `TRACK_PRIMED|${payload.transactionId}|${payload.id}`,
+              );
+              addLog(`Re-sent ready acknowledgement: ${payload.name}`);
+            } else {
+              addLog(`Prepare already in progress: ${payload.name}`);
+            }
+            return;
+          }
+
+          nodePrepareTransactionRef.current = payload.transactionId;
+          nodePrimedTransactionRef.current = null;
           pendingScheduledPlaybackRef.current = {trackId: payload.id, targetTimeMs: Number.MAX_SAFE_INTEGER};
           currentlyPlayingTrackRef.current = null;
+
           await PartyAudio.primeCachedTrack(payload.id, payload.name);
 
-          // Only acknowledge if this preparation is still the active one.
+          // Ignore a late completion from an older preparation transaction.
+          if (nodePrepareTransactionRef.current !== payload.transactionId) {
+            addLog(`Ignored stale prepare completion: ${payload.name}`);
+            return;
+          }
+
           if (pendingScheduledPlaybackRef.current?.trackId === payload.id) {
-            writeSocket(clientRef.current || client, `TRACK_PRIMED|${payload.transactionId}|${payload.id}`);
+            nodePrimedTransactionRef.current = payload.transactionId;
+            writeSocket(
+              clientRef.current || client,
+              `TRACK_PRIMED|${payload.transactionId}|${payload.id}`,
+            );
             setStatus(`Ready to play: ${payload.name}`);
             addLog(`Primed and waiting: ${payload.name}`);
           }
         } catch (error) {
-          addLog(`Track prepare error: ${String(error)}`);
-          setStatus('Could not prepare track');
+          nodePrepareTransactionRef.current = null;
+          nodePrimedTransactionRef.current = null;
+          pendingScheduledPlaybackRef.current = null;
+          const detail = String(error).replace(/\|/g, '/');
+          writeSocket(
+            clientRef.current || client,
+            `TRACK_PREPARE_FAILED|${preparePayload?.transactionId || 'unknown'}|${preparePayload?.id || 'unknown'}|${detail}`,
+          );
+          addLog(`Track prepare error: ${detail}`);
+          setStatus('Prepare failed; waiting for retry');
         }
         return;
       }
@@ -1886,6 +1991,11 @@ export default function App() {
         try {
           const payload = JSON.parse(message.replace('START_PRIMED_AT|', ''));
           if (!payload.id || !payload.name || !payload.targetTimeMs) return;
+
+          if (payload.transactionId && nodePrimedTransactionRef.current !== payload.transactionId) {
+            addLog(`Ignored start for unprimed transaction: ${payload.name}`);
+            return;
+          }
 
           const localTargetTimeMs =
             Date.now() +
@@ -1906,6 +2016,8 @@ export default function App() {
 
           await PartyAudio.startPrimedTrackAt(localTargetTimeMs);
           pendingScheduledPlaybackRef.current = null;
+          nodePrepareTransactionRef.current = null;
+          nodePrimedTransactionRef.current = null;
           currentlyPlayingTrackRef.current = payload.id;
           startNodeDriftMonitor();
           setStatus(`Playing: ${payload.name}`);
