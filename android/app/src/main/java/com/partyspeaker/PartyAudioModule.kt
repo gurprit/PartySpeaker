@@ -49,6 +49,7 @@ class PartyAudioModule(
     private var pickAudioFolderPromise: Promise? = null
     private var currentPlayer: MediaPlayer? = null
     private var currentExoPlayer: ExoPlayer? = null
+    private var standbyExoPlayer: ExoPlayer? = null
     private var playbackLevelRunning = false
     private var playbackLevelHandler: Handler? = null
     private val transferTracks = ConcurrentHashMap<String, String>()
@@ -549,6 +550,113 @@ class PartyAudioModule(
         } catch (error: Exception) {
             promise.reject("PREPARE_AUDIO_URI_ERROR", error)
         }
+    }
+
+    @ReactMethod
+    fun primeStandbyCachedTrack(trackId: String, fileName: String, promise: Promise) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post { primeStandbyCachedTrack(trackId, fileName, promise) }
+            return
+        }
+        try {
+            try { standbyExoPlayer?.release() } catch (_: Exception) {}
+            standbyExoPlayer = null
+
+            val safeTrackId = trackId.replace(Regex("[^A-Za-z0-9_-]"), "_")
+            val safeFileName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            val file = File(File(reactContext.filesDir, "party_tracks"), "${safeTrackId}_${safeFileName}")
+            if (!file.exists()) {
+                promise.reject("STANDBY_TRACK_MISSING", "Cached standby track not found")
+                return
+            }
+
+            val player = ExoPlayer.Builder(reactContext).setLooper(Looper.getMainLooper()).build()
+            standbyExoPlayer = player
+            player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
+            var settled = false
+            player.addListener(object : Player.Listener {
+                override fun onPlaybackStateChanged(state: Int) {
+                    if (state == Player.STATE_READY && !settled && standbyExoPlayer === player) {
+                        settled = true
+                        promise.resolve(true)
+                    }
+                }
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    if (!settled) {
+                        settled = true
+                        promise.reject("STANDBY_PRIME_ERROR", error.message, error)
+                    }
+                }
+            })
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (!settled && standbyExoPlayer === player) {
+                    settled = true
+                    promise.reject("STANDBY_PRIME_TIMEOUT", "Standby player did not become ready within 15000ms")
+                }
+            }, 15000L)
+            player.prepare()
+        } catch (error: Exception) {
+            promise.reject("STANDBY_PRIME_CACHED_ERROR", error)
+        }
+    }
+
+    @ReactMethod
+    fun primeStandbyAudioUri(uriString: String, promise: Promise) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post { primeStandbyAudioUri(uriString, promise) }
+            return
+        }
+        try {
+            try { standbyExoPlayer?.release() } catch (_: Exception) {}
+            standbyExoPlayer = null
+            val player = ExoPlayer.Builder(reactContext).setLooper(Looper.getMainLooper()).build()
+            standbyExoPlayer = player
+            player.setMediaItem(MediaItem.fromUri(Uri.parse(uriString)))
+            var settled = false
+            player.addListener(object : Player.Listener {
+                override fun onPlaybackStateChanged(state: Int) {
+                    if (state == Player.STATE_READY && !settled && standbyExoPlayer === player) {
+                        settled = true
+                        promise.resolve(true)
+                    }
+                }
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    if (!settled) {
+                        settled = true
+                        promise.reject("STANDBY_URI_PRIME_ERROR", error.message, error)
+                    }
+                }
+            })
+            player.prepare()
+        } catch (error: Exception) {
+            promise.reject("STANDBY_PRIME_URI_ERROR", error)
+        }
+    }
+
+    @ReactMethod
+    fun startStandbyTrackAt(localTargetTimeMs: Double, promise: Promise) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post { startStandbyTrackAt(localTargetTimeMs, promise) }
+            return
+        }
+        val standby = standbyExoPlayer
+        if (standby == null) {
+            promise.reject("NO_STANDBY_PLAYER", "No prepared standby player is available")
+            return
+        }
+        val remainingMs = (localTargetTimeMs - System.currentTimeMillis()).toLong().coerceAtLeast(0L)
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (standbyExoPlayer === standby) {
+                stopPlaybackLevelEvents()
+                try { currentExoPlayer?.stop() } catch (_: Exception) {}
+                try { currentExoPlayer?.release() } catch (_: Exception) {}
+                currentExoPlayer = standby
+                standbyExoPlayer = null
+                standby.play()
+                startPlaybackLevelEvents()
+            }
+        }, remainingMs)
+        promise.resolve(true)
     }
 
     @ReactMethod
