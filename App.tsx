@@ -70,6 +70,10 @@ const DRIFT_FIRST_PLAY_RESYNC_MS = 15;
 const CLOCK_CALIBRATION_SAMPLES = 5;
 const CLOCK_CALIBRATION_SPACING_MS = 90;
 const CLOCK_CALIBRATION_SETTLE_MS = 650;
+const FAST_CLOCK_CALIBRATION_SAMPLES = 3;
+const FAST_CLOCK_CALIBRATION_SPACING_MS = 60;
+const FAST_CLOCK_CALIBRATION_SETTLE_MS = 300;
+const FAST_STANDBY_START_RUNWAY_MS = 600;
 const METADATA_HEAD_START_MS = 500;
 const TRANSFER_ACK_EVERY_CHUNKS = 8;
 const TRANSFER_ACK_TIMEOUT_MS = 8000;
@@ -426,6 +430,34 @@ export default function App() {
     }
 
     await new Promise<void>(resolve => setTimeout(resolve, CLOCK_CALIBRATION_SETTLE_MS));
+  };
+
+  const calibrateNodeClocksForPrewarmedTrack = async () => {
+    bestClockSampleRef.current = null;
+    const liveSockets = clientsRef.current.filter(isSocketUsable);
+    if (liveSockets.length === 0) return;
+
+    liveSockets.forEach(socket => writeSocket(socket, 'SYNC_RESET'));
+    await new Promise<void>(resolve => setTimeout(resolve, 50));
+
+    addLog(`Fast clock calibration: ${FAST_CLOCK_CALIBRATION_SAMPLES} samples`);
+
+    for (let sample = 0; sample < FAST_CLOCK_CALIBRATION_SAMPLES; sample += 1) {
+      const requestId = `fast-${Date.now()}-${sample}-${Math.random()}`;
+      liveSockets.forEach(socket => {
+        writeSocket(socket, `SYNC_REQUEST|${requestId}`);
+      });
+
+      if (sample < FAST_CLOCK_CALIBRATION_SAMPLES - 1) {
+        await new Promise<void>(resolve =>
+          setTimeout(resolve, FAST_CLOCK_CALIBRATION_SPACING_MS),
+        );
+      }
+    }
+
+    await new Promise<void>(resolve =>
+      setTimeout(resolve, FAST_CLOCK_CALIBRATION_SETTLE_MS),
+    );
   };
 
   const broadcastNowPlaying = () => {
