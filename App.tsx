@@ -61,10 +61,12 @@ const TRANSFER_CHUNK_SIZE = 12000;
 const TRANSFER_BATCH_SIZE = 4;
 const TRANSFER_BATCH_PAUSE_MS = 12;
 const TRACK_CACHE_TIMEOUT_MS = 120000;
-const DRIFT_CHECK_INTERVAL_MS = 750;
-const DRIFT_INITIAL_CHECK_MS = 450;
-const DRIFT_HARD_RESYNC_MS = 250;
-const DRIFT_LOG_THRESHOLD_MS = 120;
+const DRIFT_CHECK_INTERVAL_MS = 500;
+const DRIFT_INITIAL_CHECK_MS = 180;
+const DRIFT_HARD_RESYNC_MS = 60;
+const DRIFT_INITIAL_RESYNC_MS = 35;
+const DRIFT_LOG_THRESHOLD_MS = 30;
+const DRIFT_FIRST_PLAY_RESYNC_MS = 15;
 const CLOCK_CALIBRATION_SAMPLES = 5;
 const CLOCK_CALIBRATION_SPACING_MS = 90;
 const CLOCK_CALIBRATION_SETTLE_MS = 650;
@@ -105,6 +107,7 @@ export default function App() {
   const [trackTransferStatus, setTrackTransferStatus] = useState<Record<string, number>>({});
   const [hostClockOffsetMs, setHostClockOffsetMs] = useState(0);
   const [playbackPositionText, setPlaybackPositionText] = useState('0:00');
+  const [playbackPositionMs, setPlaybackPositionMs] = useState(0);
   const [nowPlayingText, setNowPlayingText] = useState('Nothing playing');
   const [playbackState, setPlaybackState] = useState<'idle' | 'playing' | 'paused'>('idle');
   const [nowPlayingTrackId, setNowPlayingTrackId] = useState<string | null>(null);
@@ -142,6 +145,12 @@ export default function App() {
   const playlistRef = useRef<Track[]>([]);
   const selectedTrackIdRef = useRef<string | null>(null);
   const transferAckRef = useRef<Record<string, number>>({});
+  const autoAdvancedTrackRef = useRef<string | null>(null);
+  const pendingScheduledPlaybackRef = useRef<{trackId: string; targetTimeMs: number} | null>(null);
+  const strictPrepareTransactionRef = useRef<string | null>(null);
+  const strictPreparedNodesRef = useRef<Set<string>>(new Set());
+  const preloadQueueRef = useRef<Track[]>([]);
+  const preloadQueueRunningRef = useRef(false);
 
   useEffect(() => {
     refreshHostAddress();
@@ -161,6 +170,11 @@ export default function App() {
       const trackId = String(event?.trackId || '');
       const percent = Math.max(1, Math.min(99, Math.round(Number(event?.percent) || 1)));
       if (!trackId) return;
+
+      if (nodeCachedTrackIdsRef.current.has(trackId)) {
+        setTrackProgress(trackId, 100);
+        return;
+      }
 
       setTrackProgress(trackId, percent);
 
@@ -302,7 +316,8 @@ export default function App() {
 
     playbackUiTimerRef.current = setInterval(() => {
       const hostNow = mode === 'host' ? Date.now() : getNodeHostNowMs();
-      const positionMs = hostNow - startedAtHostMs;
+      const positionMs = Math.max(0, hostNow - startedAtHostMs);
+      setPlaybackPositionMs(positionMs);
       setPlaybackPositionText(formatMs(positionMs));
     }, 500);
   };
@@ -314,7 +329,7 @@ export default function App() {
     }
   };
 
-  const correctNodePlaybackDrift = async (label = 'periodic') => {
+  const correctNodePlaybackDrift = async (label = 'periodic', thresholdMs = DRIFT_HARD_RESYNC_MS) => {
     if (mode !== 'node' || appStateRef.current !== 'active') return;
     if (!nowPlayingRef.current || !currentlyPlayingTrackRef.current) return;
 
@@ -332,7 +347,11 @@ export default function App() {
         addLog(`Playback drift (${label}): ${Math.round(driftMs)}ms`);
       }
 
-      if (Math.abs(driftMs) >= DRIFT_HARD_RESYNC_MS) {
+      const resyncThreshold = label === 'initial'
+        ? DRIFT_INITIAL_RESYNC_MS
+        : DRIFT_HARD_RESYNC_MS;
+
+      if (Math.abs(driftMs) >= resyncThreshold) {
         await PartyAudio.seekCurrentPlayback(expectedPosition);
         addLog(`Playback resynced (${label}) by ${Math.round(-driftMs)}ms`);
       }
@@ -344,14 +363,14 @@ export default function App() {
   const startNodeDriftMonitor = () => {
     stopNodeDriftMonitor();
 
-    // The first correction happens quickly after ExoPlayer actually starts.
-    // This catches device-specific decoder/startup latency before it becomes audible drift.
-    setTimeout(() => {
-      correctNodePlaybackDrift('initial');
-    }, DRIFT_INITIAL_CHECK_MS);
+    [DRIFT_INITIAL_CHECK_MS, 420, 850, 1400].forEach((delayMs, index) => {
+      setTimeout(() => {
+        correctNodePlaybackDrift(`startup-${index + 1}`, DRIFT_FIRST_PLAY_RESYNC_MS);
+      }, delayMs);
+    });
 
     nodeDriftTimerRef.current = setInterval(() => {
-      correctNodePlaybackDrift();
+      correctNodePlaybackDrift('periodic', DRIFT_HARD_RESYNC_MS);
     }, DRIFT_CHECK_INTERVAL_MS);
   };
 
@@ -363,6 +382,7 @@ export default function App() {
 
     stopNodeDriftMonitor();
     currentlyPlayingTrackRef.current = null;
+    setPlaybackPositionMs(0);
     setPlaybackPositionText('0:00');
     setNowPlayingText('Nothing playing');
     setPlaybackState('idle');
@@ -443,12 +463,48 @@ export default function App() {
   };
 
   const preloadPlaylistToNodes = (tracksSnapshot = playlistRef.current) => {
-    tracksSnapshot.forEach((track, index) => {
-      setTimeout(() => {
-        activeTransferIdsRef.current.delete(track.id);
-        transferSelectedTrackToNodes(track);
-      }, index * 350);
+    // Folder imports can contain dozens of songs. Queue them instead of firing
+    // every native download at once, which makes the phones and Wi-Fi fight over
+    // bandwidth and leaves progress states looking chaotic.
+    tracksSnapshot.forEach(track => {
+      const alreadyQueued = preloadQueueRef.current.some(item => item.id === track.id);
+      if (!alreadyQueued && !isTrackCachedOnAllNodes(track.id)) {
+        preloadQueueRef.current.push(track);
+      }
     });
+
+    if (preloadQueueRunningRef.current) return;
+    preloadQueueRunningRef.current = true;
+
+    const runQueue = async () => {
+      try {
+        while (preloadQueueRef.current.length > 0) {
+          const track = preloadQueueRef.current.shift();
+          if (!track || isTrackCachedOnAllNodes(track.id)) continue;
+
+          addLog(`Queue upload starting: ${track.name}`);
+          activeTransferIdsRef.current.delete(track.id);
+          await transferSelectedTrackToNodes(track);
+
+          try {
+            await waitForTrackCachedOnAllNodes(track);
+            addLog(`Queue upload complete: ${track.name}`);
+          } catch (error) {
+            addLog(`Queue upload timed out/skipped: ${track.name} (${String(error)})`);
+          }
+        }
+      } finally {
+        preloadQueueRunningRef.current = false;
+
+        // A reconnect or another folder import may have appended work while the
+        // previous item was finishing. Pick it up automatically.
+        if (preloadQueueRef.current.length > 0) {
+          preloadPlaylistToNodes([]);
+        }
+      }
+    };
+
+    runQueue();
   };
 
   const autoSyncAndTransfer = (track?: Track, playlistSnapshot?: Track[], selectedIdSnapshot?: string | null) => {
@@ -504,6 +560,53 @@ export default function App() {
       setTimeout(() => transferSelectedTrackToNodes(track), 150);
     } catch (error) {
       addLog(`Add track cancelled/error: ${String(error)}`);
+    }
+  };
+
+  const addFolder = async () => {
+    try {
+      const picked = await PartyAudio.pickAudioFolder();
+      const items = Array.isArray(picked) ? picked : [];
+      if (items.length === 0) {
+        Alert.alert('No music found', 'No supported audio files were found in that folder.');
+        return;
+      }
+
+      addLog(`Importing ${items.length} track(s) from folder`);
+      const imported: Track[] = [];
+
+      for (const item of items) {
+        const name = String(item?.name || 'Selected audio');
+        const uri = String(item?.uri || '');
+        if (!uri) continue;
+
+        try {
+          const metadata = await MetadataService.getMetadata(name, uri);
+          const track: Track = {
+            id: `${Date.now()}-${Math.random()}`,
+            name,
+            uri,
+            metadata,
+          };
+          await PartyAudio.registerTrackForTransfer(track.id, track.uri);
+          imported.push(track);
+        } catch (error) {
+          addLog(`Skipped ${name}: ${String(error)}`);
+        }
+      }
+
+      if (imported.length === 0) return;
+
+      const nextPlaylist = [...playlistRef.current, ...imported];
+      playlistRef.current = nextPlaylist;
+      setPlaylist(nextPlaylist);
+      imported.forEach(track => setTrackProgress(track.id, 0));
+      syncPlaylistSnapshotToNodes(nextPlaylist, selectedTrackIdRef.current);
+      setTimeout(() => preloadPlaylistToNodes(imported), 250);
+      setStatus(`Added ${imported.length} track(s) from folder`);
+      addLog(`Folder import complete: ${imported.length} track(s)`);
+    } catch (error) {
+      addLog(`Folder import cancelled/error: ${String(error)}`);
     }
   };
 
@@ -755,6 +858,10 @@ export default function App() {
             const percent = Math.max(1, Math.min(99, Math.round(Number(rawPercent) || 1)));
             const key = socket.remoteAddress || 'unknown';
 
+            if (cachedTracksRef.current[key]?.includes(trackId)) {
+              return;
+            }
+
             if (!trackNodeProgressRef.current[trackId]) {
               trackNodeProgressRef.current[trackId] = {};
             }
@@ -767,14 +874,29 @@ export default function App() {
                 ? 100
                 : trackNodeProgressRef.current[trackId]?.[clientKey] || 0;
             });
-            const overallProgress = progressValues.length > 0
-              ? Math.max(1, Math.min(99, Math.min(...progressValues)))
-              : percent;
+            const allCached = progressValues.length > 0 && progressValues.every(value => value >= 100);
+            const overallProgress = allCached
+              ? 100
+              : progressValues.length > 0
+                ? Math.max(1, Math.min(99, Math.min(...progressValues)))
+                : percent;
 
             setTrackProgress(trackId, overallProgress);
             if (selectedTrackIdRef.current === trackId) {
               setTransferProgress(overallProgress);
               setTransferProgressText(`Uploading to speakers: ${overallProgress}%`);
+            }
+            return;
+          }
+
+          if (message.startsWith('TRACK_PRIMED|')) {
+            const [, transactionId, trackId] = message.split('|');
+            if (transactionId && trackId && strictPrepareTransactionRef.current === transactionId) {
+              const key = socket.remoteAddress || 'unknown';
+              strictPreparedNodesRef.current.add(key);
+              const liveSockets = clientsRef.current.filter(isSocketUsable);
+              setStatus(`Preparing speakers: ${strictPreparedNodesRef.current.size}/${liveSockets.length} ready`);
+              addLog(`Speaker primed: ${key} (${strictPreparedNodesRef.current.size}/${liveSockets.length})`);
             }
             return;
           }
@@ -793,6 +915,11 @@ export default function App() {
             if (!cachedTracksRef.current[key].includes(trackId)) {
               cachedTracksRef.current[key].push(trackId);
             }
+
+            if (!trackNodeProgressRef.current[trackId]) {
+              trackNodeProgressRef.current[trackId] = {};
+            }
+            trackNodeProgressRef.current[trackId][key] = 100;
 
             const liveSockets = clientsRef.current.filter(isSocketUsable);
             const cachedCount = liveSockets.filter(clientSocket => {
@@ -1063,6 +1190,39 @@ export default function App() {
     }, 1000);
   };
 
+  useEffect(() => {
+    if (mode !== 'host' || playbackState !== 'playing' || !nowPlayingTrackId) return;
+
+    const currentIndex = playlistRef.current.findIndex(track => track.id === nowPlayingTrackId);
+    if (currentIndex < 0) return;
+
+    const current = playlistRef.current[currentIndex];
+    const durationMs = Number(current.metadata?.durationMs || 0);
+    if (!durationMs || playbackPositionMs < durationMs - 350) return;
+    if (autoAdvancedTrackRef.current === current.id) return;
+
+    autoAdvancedTrackRef.current = current.id;
+    const nextTrack = playlistRef.current[currentIndex + 1];
+
+    if (!nextTrack) {
+      nowPlayingRef.current = null;
+      setNowPlayingTrackId(null);
+      setPlaybackState('idle');
+      stopPlaybackUiClock();
+      setStatus('Playlist finished');
+      return;
+    }
+
+    selectedTrackIdRef.current = nextTrack.id;
+    setSelectedTrackId(nextTrack.id);
+    syncPlaylistSnapshotToNodes(playlistRef.current, nextTrack.id);
+    setTimeout(() => playSelectedTrackOnAllSpeakers(nextTrack), 120);
+  }, [mode, playbackState, nowPlayingTrackId, playbackPositionMs]);
+
+  useEffect(() => {
+    if (nowPlayingTrackId) autoAdvancedTrackRef.current = null;
+  }, [nowPlayingTrackId]);
+
   const isTrackCachedOnAllNodes = (trackId: string) => {
     const liveSockets = clientsRef.current.filter(isSocketUsable);
     if (liveSockets.length === 0) {
@@ -1127,12 +1287,78 @@ export default function App() {
 
     await calibrateNodeClocksBeforePlayback();
 
-    const targetTimeMs = Date.now() + START_BUFFER_MS;
-    const payload = {
+    const liveSockets = clientsRef.current.filter(isSocketUsable);
+    if (liveSockets.length === 0) {
+      setStatus('No connected speakers');
+      return;
+    }
+
+    // Phase 1: every speaker prepares/decodes the same cached track, but nobody
+    // is allowed to play yet. This removes first-play decoder speed from sync.
+    const transactionId = `${selected.id}-${Date.now()}-${Math.random()}`;
+    strictPrepareTransactionRef.current = transactionId;
+    strictPreparedNodesRef.current = new Set();
+    setStatus(`Preparing speakers: 0/${liveSockets.length} ready`);
+
+    const preparePayload = {
       id: selected.id,
       name: selected.name,
+      transactionId,
+    };
+
+    liveSockets.forEach(socket => {
+      writeSocket(socket, `PREPARE_TRACK|${JSON.stringify(preparePayload)}`);
+    });
+
+    // Prime the host as a speaker too. This promise resolves only once ExoPlayer
+    // is STATE_READY, so the host participates in the same readiness barrier.
+    try {
+      await PartyAudio.primeAudioUri(selected.uri);
+    } catch (error) {
+      strictPrepareTransactionRef.current = null;
+      setStatus('Host could not prepare track');
+      Alert.alert('Playback preparation failed', String(error));
+      return;
+    }
+
+    const prepareStartedAt = Date.now();
+    const PREPARE_TIMEOUT_MS = 12000;
+
+    while (true) {
+      const currentSockets = clientsRef.current.filter(isSocketUsable);
+      const allReady =
+        currentSockets.length > 0 &&
+        currentSockets.every(socket =>
+          strictPreparedNodesRef.current.has(socket.remoteAddress || 'unknown'),
+        );
+
+      if (allReady) break;
+
+      if (Date.now() - prepareStartedAt > PREPARE_TIMEOUT_MS) {
+        const readyCount = currentSockets.filter(socket =>
+          strictPreparedNodesRef.current.has(socket.remoteAddress || 'unknown'),
+        ).length;
+        strictPrepareTransactionRef.current = null;
+        setStatus(`Playback cancelled: only ${readyCount}/${currentSockets.length} speakers became ready`);
+        Alert.alert(
+          'Speakers not ready',
+          `Playback was not started because only ${readyCount} of ${currentSockets.length} speakers were ready.`,
+        );
+        return;
+      }
+
+      await new Promise<void>(resolve => setTimeout(resolve, 100));
+    }
+
+    // Phase 2: once EVERY live node and the host are primed, give them a fresh
+    // common start point. The 1.5s runway is only scheduling time now, not decode time.
+    await calibrateNodeClocksBeforePlayback();
+    const targetTimeMs = Date.now() + 1500;
+    const startPayload = {
+      id: selected.id,
+      name: selected.name,
+      transactionId,
       targetTimeMs,
-      hostNowMs: Date.now(),
     };
 
     nowPlayingRef.current = {
@@ -1144,21 +1370,27 @@ export default function App() {
     setCurrentTrackName(selected.name);
     if (selected.metadata) setCurrentTrackMetadata(selected.metadata);
 
-    clientsRef.current.forEach(socket => {
-      sendTimeSyncToNode(socket);
-      writeSocket(socket, `PLAY_TRACK_AT|${JSON.stringify(payload)}`);
+    liveSockets.forEach(socket => {
+      writeSocket(socket, `START_PRIMED_AT|${JSON.stringify(startPayload)}`);
     });
+
+    try {
+      await PartyAudio.startPrimedTrackAt(targetTimeMs);
+    } catch (error) {
+      addLog(`Host primed start error: ${String(error)}`);
+    }
+
+    strictPrepareTransactionRef.current = null;
 
     if (nowPlayingBroadcastTimerRef.current) {
       clearInterval(nowPlayingBroadcastTimerRef.current);
     }
-
     nowPlayingBroadcastTimerRef.current = setInterval(broadcastNowPlaying, 3000);
 
     startPlaybackUiClock(selected.name, targetTimeMs);
     setPlaybackState('playing');
-    addLog(`Play on all speakers scheduled: ${selected.name}`);
-    setStatus(`Playing on all speakers in ${Math.round(START_BUFFER_MS / 1000)}s`);
+    addLog(`Strict synchronized start: ${selected.name}`);
+    setStatus('All speakers ready • synchronized start scheduled');
   };
 
   const transferSelectedTrackToNodes = async (trackOverride?: Track) => {
@@ -1477,8 +1709,15 @@ export default function App() {
 
             const alreadyPlayingThisTrack =
               currentlyPlayingTrackRef.current === payload.trackId;
+            const pending = pendingScheduledPlaybackRef.current;
+            const sameTrackStillScheduled =
+              pending?.trackId === payload.trackId &&
+              getNodeHostNowMs() < (pending?.targetTimeMs ?? 0) + 1500;
 
-            if (!alreadyPlayingThisTrack) {
+            // NOW_PLAYING is a state heartbeat, not a second playback command.
+            // While a prewarmed start is pending, never let catch-up playback
+            // replace the prepared ExoPlayer instance.
+            if (!alreadyPlayingThisTrack && !sameTrackStillScheduled) {
               const hostNow = getNodeHostNowMs();
               const positionMs = hostNow - payload.startedAtHostMs;
 
@@ -1515,6 +1754,7 @@ export default function App() {
           addLog(`Pause error: ${String(error)}`);
         }
 
+        pendingScheduledPlaybackRef.current = null;
         nowPlayingRef.current = null;
         stopPlaybackUiClock();
         setStatus('Paused');
@@ -1620,6 +1860,63 @@ export default function App() {
         }
       }
 
+      if (message.startsWith('PREPARE_TRACK|')) {
+        try {
+          const payload = JSON.parse(message.replace('PREPARE_TRACK|', ''));
+          if (!payload.id || !payload.name || !payload.transactionId) return;
+
+          pendingScheduledPlaybackRef.current = {trackId: payload.id, targetTimeMs: Number.MAX_SAFE_INTEGER};
+          currentlyPlayingTrackRef.current = null;
+          await PartyAudio.primeCachedTrack(payload.id, payload.name);
+
+          // Only acknowledge if this preparation is still the active one.
+          if (pendingScheduledPlaybackRef.current?.trackId === payload.id) {
+            writeSocket(clientRef.current || client, `TRACK_PRIMED|${payload.transactionId}|${payload.id}`);
+            setStatus(`Ready to play: ${payload.name}`);
+            addLog(`Primed and waiting: ${payload.name}`);
+          }
+        } catch (error) {
+          addLog(`Track prepare error: ${String(error)}`);
+          setStatus('Could not prepare track');
+        }
+        return;
+      }
+
+      if (message.startsWith('START_PRIMED_AT|')) {
+        try {
+          const payload = JSON.parse(message.replace('START_PRIMED_AT|', ''));
+          if (!payload.id || !payload.name || !payload.targetTimeMs) return;
+
+          const localTargetTimeMs =
+            Date.now() +
+            Math.max(0, payload.targetTimeMs - getNodeHostNowMs()) +
+            getPlaybackDelayCompensationMs();
+
+          pendingScheduledPlaybackRef.current = {
+            trackId: payload.id,
+            targetTimeMs: payload.targetTimeMs,
+          };
+          nowPlayingRef.current = {
+            trackId: payload.id,
+            trackName: payload.name,
+            startedAtHostMs: payload.targetTimeMs,
+          };
+          setNowPlayingTrackId(payload.id);
+          startPlaybackUiClock(payload.name, payload.targetTimeMs);
+
+          await PartyAudio.startPrimedTrackAt(localTargetTimeMs);
+          pendingScheduledPlaybackRef.current = null;
+          currentlyPlayingTrackRef.current = payload.id;
+          startNodeDriftMonitor();
+          setStatus(`Playing: ${payload.name}`);
+          addLog(`Strict primed start scheduled: ${payload.name}`);
+        } catch (error) {
+          pendingScheduledPlaybackRef.current = null;
+          addLog(`Primed start error: ${String(error)}`);
+        }
+        return;
+      }
+
       if (message.startsWith('PLAY_TRACK_AT|')) {
         try {
           const payload = JSON.parse(message.replace('PLAY_TRACK_AT|', ''));
@@ -1629,6 +1926,19 @@ export default function App() {
             return;
           }
 
+          const existingPending = pendingScheduledPlaybackRef.current;
+          if (
+            existingPending?.trackId === payload.id &&
+            Math.abs((existingPending?.targetTimeMs ?? 0) - payload.targetTimeMs) < 250
+          ) {
+            addLog(`Ignored duplicate scheduled playback: ${payload.name}`);
+            return;
+          }
+
+          pendingScheduledPlaybackRef.current = {
+            trackId: payload.id,
+            targetTimeMs: payload.targetTimeMs,
+          };
           currentlyPlayingTrackRef.current = null;
 
           nowPlayingRef.current = {
@@ -1761,6 +2071,7 @@ export default function App() {
 
   const playCachedTrackFromPosition = async (trackId: string, trackName: string, positionMs: number) => {
     try {
+      pendingScheduledPlaybackRef.current = null;
       const safePosition = Math.max(0, positionMs + getPlaybackDelayCompensationMs());
       await PartyAudio.playCachedTrackFrom(trackId, trackName, safePosition);
       currentlyPlayingTrackRef.current = trackId;
@@ -1806,18 +2117,33 @@ export default function App() {
     updateCountdown();
     countdownTimerRef.current = setInterval(updateCountdown, 200);
 
-    setTimeout(async () => {
-      try {
-        await PartyAudio.playCachedTrack(trackId, trackName);
+    // Prepare/prime ExoPlayer immediately, while we still have several seconds
+    // before the shared target time. Starting preparation at the target itself
+    // makes first play depend on decoder/file-cache warmup and creates audible
+    // device-to-device skew. Native code waits until this local wall-clock target
+    // before actually starting the already-prepared player.
+    const localTargetTimeMs = Date.now() + delay;
+
+    PartyAudio.prepareCachedTrackAt(trackId, trackName, localTargetTimeMs)
+      .then(() => {
+        if (pendingScheduledPlaybackRef.current?.trackId === trackId) {
+          pendingScheduledPlaybackRef.current = null;
+        }
         currentlyPlayingTrackRef.current = trackId;
         startNodeDriftMonitor();
-        addLog(`Playing scheduled cached track: ${trackName}`);
+        addLog(`Playing prewarmed cached track: ${trackName}`);
         setStatus(`Playing: ${trackName}`);
-      } catch (error) {
-        addLog(`Scheduled cached track error: ${String(error)}`);
-        Alert.alert('Scheduled playback error', String(error));
-      }
-    }, delay);
+      })
+      .catch((error: unknown) => {
+        const detail = String(error);
+        if (pendingScheduledPlaybackRef.current?.trackId === trackId) {
+          pendingScheduledPlaybackRef.current = null;
+        }
+        addLog(`Prewarmed scheduled track error: ${detail}`);
+        if (!detail.includes('PREWARM_CANCELLED') && !detail.includes('Prepared player was replaced')) {
+          Alert.alert('Scheduled playback error', detail);
+        }
+      });
   };
 
   const playCachedSelectedTrack = async () => {
@@ -1965,17 +2291,29 @@ export default function App() {
       currentTrackName={currentTrackName}
       nowPlayingText={nowPlayingText}
       playbackPositionText={playbackPositionText}
+      playbackPositionMs={playbackPositionMs}
       transferProgressText={transferProgressText}
       transferProgress={transferProgress}
       playlist={playlist}
       selectedTrackId={selectedTrackId}
       trackTransferStatus={trackTransferStatus}
       addTrack={addTrack}
+      addFolder={addFolder}
       removeSelectedTrack={removeSelectedTrack}
       setSelectedTrackId={setSelectedTrackId}
       setCurrentTrackName={setCurrentTrackName}
       addLog={addLog}
       autoSyncAndTransfer={autoSyncAndTransfer}
+      onTrackSelected={(track: Track) => {
+        selectedTrackIdRef.current = track.id;
+        setSelectedTrackId(track.id);
+        syncPlaylistSnapshotToNodes(playlistRef.current, track.id);
+        if (isTrackCachedOnAllNodes(track.id)) {
+          playSelectedTrackOnAllSpeakers(track);
+        } else {
+          transferSelectedTrackToNodes(track);
+        }
+      }}
       onMetadataChange={setCurrentTrackMetadata}
       selectedTrackReady={selectedTrackReadyForPlayback}
       playbackState={playbackState}
@@ -2093,7 +2431,6 @@ export default function App() {
             style={{width: '100%', marginTop: 18}}
           />
 
-          {renderDebugTools()}
 
           <PartyButton
             title="Back"
@@ -2296,68 +2633,6 @@ export default function App() {
               {playbackPositionText}
             </Text>
           </PartyCard>
-
-          <PartyButton
-            title={showNodeDebugTools ? 'Hide Developer Tools ▲' : 'Developer Tools ▼'}
-            onPress={() => setShowNodeDebugTools(previous => !previous)}
-            variant="secondary"
-            style={{width: '100%', marginTop: 22}}
-          />
-
-          {showNodeDebugTools ? (
-            <PartyCard style={{width: '100%', marginTop: 14}}>
-              <SectionLabel>Developer Tools</SectionLabel>
-
-              <NodeStatusPanel
-                styles={styles}
-                status={status}
-                nowPlayingText={nowPlayingText}
-                playbackPositionText={playbackPositionText}
-                hostClockOffsetMs={hostClockOffsetMs}
-                nodePlaybackDelayMs={nodePlaybackDelayMs}
-                subnetPrefix={subnetPrefix}
-                lastMessage={lastMessage}
-              />
-
-              <NodeDelayCalibration
-                styles={styles}
-                nodePlaybackDelayMs={nodePlaybackDelayMs}
-                adjustNodeDelay={adjustNodeDelay}
-                resetNodeDelay={resetNodeDelay}
-              />
-
-              <Text style={styles.label}>Manual Host IP</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Host IP address"
-                placeholderTextColor="#666"
-                value={hostIp}
-                onChangeText={setHostIp}
-                autoCapitalize="none"
-                keyboardType="numbers-and-punctuation"
-              />
-
-              <TouchableOpacity
-                style={styles.secondaryButton}
-                onPress={() =>
-                  discoveredHost ? connectToHost(discoveredHost.ip) : connectToHost()
-                }>
-                <Text style={styles.secondaryButtonText}>Connect Using Manual IP</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.secondaryButton} onPress={scanSubnetForHost}>
-                <Text style={styles.secondaryButtonText}>
-                  {isScanning ? 'Scanning...' : 'Fallback Scan'}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.secondaryButton} onPress={sendAliveToHost}>
-                <Text style={styles.secondaryButtonText}>Send I'm Alive</Text>
-              </TouchableOpacity>
-
-              {renderLog()}
-            </PartyCard>
-          ) : null}
 
           <View style={{width: '100%', flexDirection: 'row', gap: 12, marginTop: 22}}>
             <PartyButton

@@ -22,6 +22,7 @@ import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.provider.DocumentsContract
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -42,8 +43,10 @@ class PartyAudioModule(
 ) : ReactContextBaseJavaModule(reactContext) {
 
     private val requestPickAudioCode = 9922
+    private val requestPickAudioFolderCode = 9923
 
     private var pickAudioPromise: Promise? = null
+    private var pickAudioFolderPromise: Promise? = null
     private var currentPlayer: MediaPlayer? = null
     private var currentExoPlayer: ExoPlayer? = null
     private var playbackLevelRunning = false
@@ -62,6 +65,7 @@ class PartyAudioModule(
             ) {
                 when (requestCode) {
                     requestPickAudioCode -> handlePickAudioResult(resultCode, data)
+                    requestPickAudioFolderCode -> handlePickAudioFolderResult(resultCode, data)
                 }
             }
         }
@@ -106,6 +110,76 @@ class PartyAudioModule(
         } catch (error: Exception) {
             pickAudioPromise?.reject("PICK_AUDIO_ERROR", error)
             pickAudioPromise = null
+        }
+    }
+
+    private fun handlePickAudioFolderResult(resultCode: Int, data: Intent?) {
+        if (resultCode != Activity.RESULT_OK || data?.data == null) {
+            pickAudioFolderPromise?.reject("PICK_FOLDER_CANCELLED", "Folder picking was cancelled")
+            pickAudioFolderPromise = null
+            return
+        }
+
+        try {
+            val treeUri = data.data!!
+            try {
+                reactContext.contentResolver.takePersistableUriPermission(
+                    treeUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: Exception) {}
+
+            val result = Arguments.createArray()
+            val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+            collectAudioDocuments(treeUri, rootId, result)
+            pickAudioFolderPromise?.resolve(result)
+            pickAudioFolderPromise = null
+        } catch (error: Exception) {
+            pickAudioFolderPromise?.reject("PICK_FOLDER_ERROR", error)
+            pickAudioFolderPromise = null
+        }
+    }
+
+    private fun collectAudioDocuments(
+        treeUri: Uri,
+        parentDocumentId: String,
+        result: com.facebook.react.bridge.WritableArray
+    ) {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocumentId)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE
+        )
+
+        reactContext.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+            val idIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            val mimeIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+
+            while (cursor.moveToNext()) {
+                val documentId = cursor.getString(idIndex)
+                val name = cursor.getString(nameIndex) ?: "Audio file"
+                val mime = cursor.getString(mimeIndex) ?: ""
+
+                if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    collectAudioDocuments(treeUri, documentId, result)
+                    continue
+                }
+
+                val lower = name.lowercase()
+                val supportedExtension = listOf(
+                    ".mp3", ".m4a", ".aac", ".wav", ".flac", ".ogg", ".opus"
+                ).any { lower.endsWith(it) }
+
+                if (mime.startsWith("audio/") || supportedExtension) {
+                    val uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
+                    val item = Arguments.createMap()
+                    item.putString("uri", uri.toString())
+                    item.putString("name", name)
+                    result.pushMap(item)
+                }
+            }
         }
     }
 
@@ -173,6 +247,22 @@ class PartyAudioModule(
         }
 
         activity.startActivityForResult(intent, requestPickAudioCode)
+    }
+
+    @ReactMethod
+    fun pickAudioFolder(promise: Promise) {
+        val activity = reactContext.currentActivity
+        if (activity == null) {
+            promise.reject("NO_ACTIVITY", "No active Android activity was found")
+            return
+        }
+
+        pickAudioFolderPromise = promise
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        activity.startActivityForResult(intent, requestPickAudioFolderCode)
     }
 
     @ReactMethod
@@ -318,6 +408,232 @@ class PartyAudioModule(
         }
     }
 
+
+    @ReactMethod
+    fun prepareCachedTrackAt(
+        trackId: String,
+        fileName: String,
+        localTargetTimeMs: Double,
+        promise: Promise
+    ) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post {
+                prepareCachedTrackAt(trackId, fileName, localTargetTimeMs, promise)
+            }
+            return
+        }
+
+        try {
+            stopCurrentPlayer()
+
+            val safeTrackId = trackId.replace(Regex("[^A-Za-z0-9_-]"), "_")
+            val safeFileName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            val tracksDir = File(reactContext.filesDir, "party_tracks")
+            val file = File(tracksDir, "${safeTrackId}_${safeFileName}")
+
+            if (!file.exists()) {
+                promise.reject("CACHED_TRACK_MISSING", "Cached track not found")
+                return
+            }
+
+            val player = ExoPlayer.Builder(reactContext)
+                .setLooper(Looper.getMainLooper())
+                .build()
+            currentExoPlayer = player
+            player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
+
+            var startScheduled = false
+            var promiseSettled = false
+
+            player.addListener(object : Player.Listener {
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == Player.STATE_READY && !startScheduled) {
+                        startScheduled = true
+                        val remainingMs = (localTargetTimeMs - System.currentTimeMillis())
+                            .toLong()
+                            .coerceAtLeast(0L)
+
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            if (currentExoPlayer === player) {
+                                player.play()
+                                startPlaybackLevelEvents()
+                                if (!promiseSettled) {
+                                    promiseSettled = true
+                                    promise.resolve(true)
+                                }
+                            } else if (!promiseSettled) {
+                                promiseSettled = true
+                                promise.reject("PREWARM_CANCELLED", "Prepared player was replaced before start")
+                            }
+                        }, remainingMs)
+                    }
+
+                    if (playbackState == Player.STATE_ENDED) {
+                        player.release()
+                        if (currentExoPlayer === player) {
+                            currentExoPlayer = null
+                        }
+                    }
+                }
+            })
+
+            player.prepare()
+        } catch (error: Exception) {
+            promise.reject("PREPARE_CACHED_TRACK_ERROR", error)
+        }
+    }
+
+    @ReactMethod
+    fun prepareAudioUriAt(
+        uriString: String,
+        localTargetTimeMs: Double,
+        promise: Promise
+    ) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post {
+                prepareAudioUriAt(uriString, localTargetTimeMs, promise)
+            }
+            return
+        }
+
+        try {
+            stopCurrentPlayer()
+
+            val player = ExoPlayer.Builder(reactContext)
+                .setLooper(Looper.getMainLooper())
+                .build()
+            currentExoPlayer = player
+
+            val uri = Uri.parse(uriString)
+            player.setMediaItem(MediaItem.fromUri(uri))
+
+            var startScheduled = false
+            var promiseSettled = false
+
+            player.addListener(object : Player.Listener {
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == Player.STATE_READY && !startScheduled) {
+                        startScheduled = true
+                        val remainingMs = (localTargetTimeMs - System.currentTimeMillis())
+                            .toLong()
+                            .coerceAtLeast(0L)
+
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            if (currentExoPlayer === player) {
+                                player.play()
+                                startPlaybackLevelEvents()
+                                if (!promiseSettled) {
+                                    promiseSettled = true
+                                    promise.resolve(true)
+                                }
+                            } else if (!promiseSettled) {
+                                promiseSettled = true
+                                promise.reject(
+                                    "HOST_PREWARM_CANCELLED",
+                                    "Prepared host player was replaced before start"
+                                )
+                            }
+                        }, remainingMs)
+                    }
+
+                    if (playbackState == Player.STATE_ENDED) {
+                        player.release()
+                        if (currentExoPlayer === player) {
+                            currentExoPlayer = null
+                        }
+                    }
+                }
+            })
+
+            player.prepare()
+        } catch (error: Exception) {
+            promise.reject("PREPARE_AUDIO_URI_ERROR", error)
+        }
+    }
+
+    @ReactMethod
+    fun primeCachedTrack(trackId: String, fileName: String, promise: Promise) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post { primeCachedTrack(trackId, fileName, promise) }
+            return
+        }
+        try {
+            stopCurrentPlayer()
+            val safeTrackId = trackId.replace(Regex("[^A-Za-z0-9_-]"), "_")
+            val safeFileName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            val file = File(File(reactContext.filesDir, "party_tracks"), "${safeTrackId}_${safeFileName}")
+            if (!file.exists()) {
+                promise.reject("CACHED_TRACK_MISSING", "Cached track not found")
+                return
+            }
+            val player = ExoPlayer.Builder(reactContext).setLooper(Looper.getMainLooper()).build()
+            currentExoPlayer = player
+            player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
+            var settled = false
+            player.addListener(object : Player.Listener {
+                override fun onPlaybackStateChanged(state: Int) {
+                    if (state == Player.STATE_READY && !settled) {
+                        settled = true
+                        promise.resolve(true)
+                    }
+                }
+            })
+            player.prepare()
+        } catch (error: Exception) {
+            promise.reject("PRIME_CACHED_TRACK_ERROR", error)
+        }
+    }
+
+    @ReactMethod
+    fun primeAudioUri(uriString: String, promise: Promise) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post { primeAudioUri(uriString, promise) }
+            return
+        }
+        try {
+            stopCurrentPlayer()
+            val player = ExoPlayer.Builder(reactContext).setLooper(Looper.getMainLooper()).build()
+            currentExoPlayer = player
+            player.setMediaItem(MediaItem.fromUri(Uri.parse(uriString)))
+            var settled = false
+            player.addListener(object : Player.Listener {
+                override fun onPlaybackStateChanged(state: Int) {
+                    if (state == Player.STATE_READY && !settled) {
+                        settled = true
+                        promise.resolve(true)
+                    }
+                }
+            })
+            player.prepare()
+        } catch (error: Exception) {
+            promise.reject("PRIME_AUDIO_URI_ERROR", error)
+        }
+    }
+
+    @ReactMethod
+    fun startPrimedTrackAt(localTargetTimeMs: Double, promise: Promise) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post { startPrimedTrackAt(localTargetTimeMs, promise) }
+            return
+        }
+        try {
+            val player = currentExoPlayer
+            if (player == null) {
+                promise.reject("NO_PRIMED_PLAYER", "No prepared player is available")
+                return
+            }
+            val remainingMs = (localTargetTimeMs - System.currentTimeMillis()).toLong().coerceAtLeast(0L)
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (currentExoPlayer === player) {
+                    player.play()
+                    startPlaybackLevelEvents()
+                }
+            }, remainingMs)
+            promise.resolve(true)
+        } catch (error: Exception) {
+            promise.reject("START_PRIMED_TRACK_ERROR", error)
+        }
+    }
 
     private fun startPlaybackLevelEvents() {
         if (playbackLevelRunning) {
