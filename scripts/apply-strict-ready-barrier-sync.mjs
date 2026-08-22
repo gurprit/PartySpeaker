@@ -1,0 +1,67 @@
+import fs from 'node:fs';
+
+const appFile = 'App.tsx';
+const nativeFile = 'android/app/src/main/java/com/partyspeaker/PartyAudioModule.kt';
+let app = fs.readFileSync(appFile, 'utf8');
+let native = fs.readFileSync(nativeFile, 'utf8');
+
+const requireIncludes = (source, needle, label) => {
+  if (!source.includes(needle)) throw new Error(`Patch failed: ${label}`);
+};
+
+// ----- App refs: one preparation transaction, one ready set -----
+const pendingRef = `  const pendingScheduledPlaybackRef = useRef<{trackId: string; targetTimeMs: number} | null>(null);`;
+requireIncludes(app, pendingRef, 'pending playback ref');
+if (!app.includes('strictPrepareTransactionRef')) {
+  app = app.replace(
+    pendingRef,
+    `${pendingRef}\n  const strictPrepareTransactionRef = useRef<string | null>(null);\n  const strictPreparedNodesRef = useRef<Set<string>>(new Set());`,
+  );
+}
+
+// ----- Host receives explicit READY acknowledgements -----
+const hostAckMarker = `          if (message.startsWith('TRACK_RECEIVED|')) {`;
+requireIncludes(app, hostAckMarker, 'host ACK marker');
+if (!app.includes("message.startsWith('TRACK_PRIMED|')")) {
+  app = app.replace(
+    hostAckMarker,
+    `          if (message.startsWith('TRACK_PRIMED|')) {\n            const [, transactionId, trackId] = message.split('|');\n            if (transactionId && trackId && strictPrepareTransactionRef.current === transactionId) {\n              const key = socket.remoteAddress || 'unknown';\n              strictPreparedNodesRef.current.add(key);\n              const liveSockets = clientsRef.current.filter(isSocketUsable);\n              setStatus(\`Preparing speakers: ${'${'}strictPreparedNodesRef.current.size}/${'${'}liveSockets.length} ready\`);\n              addLog(\`Speaker primed: ${'${'}key} (${'${'}strictPreparedNodesRef.current.size}/${'${'}liveSockets.length})\`);\n            }\n            return;\n          }\n\n${hostAckMarker}`,
+  );
+}
+
+// ----- Replace host's "schedule immediately" section with a strict prepare barrier -----
+const playStart = `    await calibrateNodeClocksBeforePlayback();`;
+const transferMarker = `\n  const transferSelectedTrackToNodes = async`;
+requireIncludes(app, playStart, 'playback calibration start');
+requireIncludes(app, transferMarker, 'transfer function marker');
+
+const playStartIndex = app.indexOf(playStart);
+const functionEndIndex = app.indexOf(transferMarker, playStartIndex);
+if (playStartIndex < 0 || functionEndIndex < 0) throw new Error('Patch failed: play function range');
+
+const oldTail = app.slice(playStartIndex, functionEndIndex);
+if (!oldTail.includes('setPlaybackState')) throw new Error('Patch failed: unexpected play function body');
+
+const strictTail = `    await calibrateNodeClocksBeforePlayback();\n\n    const liveSockets = clientsRef.current.filter(isSocketUsable);\n    if (liveSockets.length === 0) {\n      setStatus('No connected speakers');\n      return;\n    }\n\n    // Phase 1: every speaker prepares/decodes the same cached track, but nobody\n    // is allowed to play yet. This removes first-play decoder speed from sync.\n    const transactionId = \`${'${'}selected.id}-${'${'}Date.now()}-${'${'}Math.random()}\`;\n    strictPrepareTransactionRef.current = transactionId;\n    strictPreparedNodesRef.current = new Set();\n    setStatus(\`Preparing speakers: 0/${'${'}liveSockets.length} ready\`);\n\n    const preparePayload = {\n      id: selected.id,\n      name: selected.name,\n      transactionId,\n    };\n\n    liveSockets.forEach(socket => {\n      writeSocket(socket, \`PREPARE_TRACK|${'${'}JSON.stringify(preparePayload)}\`);\n    });\n\n    // Prime the host as a speaker too. This promise resolves only once ExoPlayer\n    // is STATE_READY, so the host participates in the same readiness barrier.\n    try {\n      await PartyAudio.primeAudioUri(selected.uri);\n    } catch (error) {\n      strictPrepareTransactionRef.current = null;\n      setStatus('Host could not prepare track');\n      Alert.alert('Playback preparation failed', String(error));\n      return;\n    }\n\n    const prepareStartedAt = Date.now();\n    const PREPARE_TIMEOUT_MS = 12000;\n\n    while (true) {\n      const currentSockets = clientsRef.current.filter(isSocketUsable);\n      const allReady =\n        currentSockets.length > 0 &&\n        currentSockets.every(socket =>\n          strictPreparedNodesRef.current.has(socket.remoteAddress || 'unknown'),\n        );\n\n      if (allReady) break;\n\n      if (Date.now() - prepareStartedAt > PREPARE_TIMEOUT_MS) {\n        const readyCount = currentSockets.filter(socket =>\n          strictPreparedNodesRef.current.has(socket.remoteAddress || 'unknown'),\n        ).length;\n        strictPrepareTransactionRef.current = null;\n        setStatus(\`Playback cancelled: only ${'${'}readyCount}/${'${'}currentSockets.length} speakers became ready\`);\n        Alert.alert(\n          'Speakers not ready',\n          \`Playback was not started because only ${'${'}readyCount} of ${'${'}currentSockets.length} speakers were ready.\`,\n        );\n        return;\n      }\n\n      await new Promise<void>(resolve => setTimeout(resolve, 100));\n    }\n\n    // Phase 2: once EVERY live node and the host are primed, give them a fresh\n    // common start point. The 1.5s runway is only scheduling time now, not decode time.\n    await calibrateNodeClocksBeforePlayback();\n    const targetTimeMs = Date.now() + 1500;\n    const startPayload = {\n      id: selected.id,\n      name: selected.name,\n      transactionId,\n      targetTimeMs,\n    };\n\n    nowPlayingRef.current = {\n      trackId: selected.id,\n      trackName: selected.name,\n      startedAtHostMs: targetTimeMs,\n    };\n    setNowPlayingTrackId(selected.id);\n    setCurrentTrackName(selected.name);\n    if (selected.metadata) setCurrentTrackMetadata(selected.metadata);\n\n    liveSockets.forEach(socket => {\n      writeSocket(socket, \`START_PRIMED_AT|${'${'}JSON.stringify(startPayload)}\`);\n    });\n\n    try {\n      await PartyAudio.startPrimedTrackAt(targetTimeMs);\n    } catch (error) {\n      addLog(\`Host primed start error: ${'${'}String(error)}\`);\n    }\n\n    strictPrepareTransactionRef.current = null;\n\n    if (nowPlayingBroadcastTimerRef.current) {\n      clearInterval(nowPlayingBroadcastTimerRef.current);\n    }\n    nowPlayingBroadcastTimerRef.current = setInterval(broadcastNowPlaying, 3000);\n\n    startPlaybackUiClock(selected.name, targetTimeMs);\n    setPlaybackState('playing');\n    addLog(\`Strict synchronized start: ${'${'}selected.name}\`);\n    setStatus('All speakers ready • synchronized start scheduled');\n  };\n`;
+
+app = app.slice(0, playStartIndex) + strictTail + app.slice(functionEndIndex);
+
+// ----- Node two-phase handlers -----
+const nodePlayMarker = `      if (message.startsWith('PLAY_TRACK_AT|')) {`;
+requireIncludes(app, nodePlayMarker, 'node PLAY_TRACK_AT marker');
+if (!app.includes("message.startsWith('PREPARE_TRACK|')")) {
+  const handlers = `      if (message.startsWith('PREPARE_TRACK|')) {\n        try {\n          const payload = JSON.parse(message.replace('PREPARE_TRACK|', ''));\n          if (!payload.id || !payload.name || !payload.transactionId) return;\n\n          pendingScheduledPlaybackRef.current = {trackId: payload.id, targetTimeMs: Number.MAX_SAFE_INTEGER};\n          currentlyPlayingTrackRef.current = null;\n          await PartyAudio.primeCachedTrack(payload.id, payload.name);\n\n          // Only acknowledge if this preparation is still the active one.\n          if (pendingScheduledPlaybackRef.current?.trackId === payload.id) {\n            writeSocket(clientRef.current || client, \`TRACK_PRIMED|${'${'}payload.transactionId}|${'${'}payload.id}\`);\n            setStatus(\`Ready to play: ${'${'}payload.name}\`);\n            addLog(\`Primed and waiting: ${'${'}payload.name}\`);\n          }\n        } catch (error) {\n          addLog(\`Track prepare error: ${'${'}String(error)}\`);\n          setStatus('Could not prepare track');\n        }\n        return;\n      }\n\n      if (message.startsWith('START_PRIMED_AT|')) {\n        try {\n          const payload = JSON.parse(message.replace('START_PRIMED_AT|', ''));\n          if (!payload.id || !payload.name || !payload.targetTimeMs) return;\n\n          const localTargetTimeMs =\n            Date.now() +\n            Math.max(0, payload.targetTimeMs - getNodeHostNowMs()) +\n            getPlaybackDelayCompensationMs();\n\n          pendingScheduledPlaybackRef.current = {\n            trackId: payload.id,\n            targetTimeMs: payload.targetTimeMs,\n          };\n          nowPlayingRef.current = {\n            trackId: payload.id,\n            trackName: payload.name,\n            startedAtHostMs: payload.targetTimeMs,\n          };\n          setNowPlayingTrackId(payload.id);\n          startPlaybackUiClock(payload.name, payload.targetTimeMs);\n\n          await PartyAudio.startPrimedTrackAt(localTargetTimeMs);\n          pendingScheduledPlaybackRef.current = null;\n          currentlyPlayingTrackRef.current = payload.id;\n          startNodeDriftMonitor();\n          setStatus(\`Playing: ${'${'}payload.name}\`);\n          addLog(\`Strict primed start scheduled: ${'${'}payload.name}\`);\n        } catch (error) {\n          pendingScheduledPlaybackRef.current = null;\n          addLog(\`Primed start error: ${'${'}String(error)}\`);\n        }\n        return;\n      }\n\n`;
+  app = app.replace(nodePlayMarker, handlers + nodePlayMarker);
+}
+
+// ----- Native priming API -----
+const nativeMarker = `\n    private fun startPlaybackLevelEvents() {`;
+requireIncludes(native, nativeMarker, 'native insertion marker');
+if (!native.includes('fun primeCachedTrack(')) {
+  const nativeMethods = `\n    @ReactMethod\n    fun primeCachedTrack(trackId: String, fileName: String, promise: Promise) {\n        if (Looper.myLooper() != Looper.getMainLooper()) {\n            Handler(Looper.getMainLooper()).post { primeCachedTrack(trackId, fileName, promise) }\n            return\n        }\n        try {\n            stopCurrentPlayer()\n            val safeTrackId = trackId.replace(Regex("[^A-Za-z0-9_-]"), "_")\n            val safeFileName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")\n            val file = File(File(reactContext.filesDir, "party_tracks"), "${'${'}safeTrackId}_${'${'}safeFileName}")\n            if (!file.exists()) {\n                promise.reject("CACHED_TRACK_MISSING", "Cached track not found")\n                return\n            }\n            val player = ExoPlayer.Builder(reactContext).setLooper(Looper.getMainLooper()).build()\n            currentExoPlayer = player\n            player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))\n            var settled = false\n            player.addListener(object : Player.Listener {\n                override fun onPlaybackStateChanged(state: Int) {\n                    if (state == Player.STATE_READY && !settled) {\n                        settled = true\n                        promise.resolve(true)\n                    }\n                }\n            })\n            player.prepare()\n        } catch (error: Exception) {\n            promise.reject("PRIME_CACHED_TRACK_ERROR", error)\n        }\n    }\n\n    @ReactMethod\n    fun primeAudioUri(uriString: String, promise: Promise) {\n        if (Looper.myLooper() != Looper.getMainLooper()) {\n            Handler(Looper.getMainLooper()).post { primeAudioUri(uriString, promise) }\n            return\n        }\n        try {\n            stopCurrentPlayer()\n            val player = ExoPlayer.Builder(reactContext).setLooper(Looper.getMainLooper()).build()\n            currentExoPlayer = player\n            player.setMediaItem(MediaItem.fromUri(Uri.parse(uriString)))\n            var settled = false\n            player.addListener(object : Player.Listener {\n                override fun onPlaybackStateChanged(state: Int) {\n                    if (state == Player.STATE_READY && !settled) {\n                        settled = true\n                        promise.resolve(true)\n                    }\n                }\n            })\n            player.prepare()\n        } catch (error: Exception) {\n            promise.reject("PRIME_AUDIO_URI_ERROR", error)\n        }\n    }\n\n    @ReactMethod\n    fun startPrimedTrackAt(localTargetTimeMs: Double, promise: Promise) {\n        if (Looper.myLooper() != Looper.getMainLooper()) {\n            Handler(Looper.getMainLooper()).post { startPrimedTrackAt(localTargetTimeMs, promise) }\n            return\n        }\n        try {\n            val player = currentExoPlayer\n            if (player == null) {\n                promise.reject("NO_PRIMED_PLAYER", "No prepared player is available")\n                return\n            }\n            val remainingMs = (localTargetTimeMs - System.currentTimeMillis()).toLong().coerceAtLeast(0L)\n            Handler(Looper.getMainLooper()).postDelayed({\n                if (currentExoPlayer === player) {\n                    player.play()\n                    startPlaybackLevelEvents()\n                }\n            }, remainingMs)\n            promise.resolve(true)\n        } catch (error: Exception) {\n            promise.reject("START_PRIMED_TRACK_ERROR", error)\n        }\n    }\n`;
+  native = native.replace(nativeMarker, nativeMethods + nativeMarker);
+}
+
+fs.writeFileSync(appFile, app);
+fs.writeFileSync(nativeFile, native);
+console.log('PartySpeaker strict all-speaker ready barrier patch applied.');
