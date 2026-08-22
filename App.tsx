@@ -614,36 +614,49 @@ export default function App() {
     }
   };
 
-  const removeSelectedTrack = () => {
-    const selected = getSelectedTrack();
+  const removeTrackById = (trackId: string) => {
+    const currentPlaylist = playlistRef.current;
+    const removed = currentPlaylist.find(track => track.id === trackId);
+    if (!removed) return;
 
-    if (!selected) {
-      addLog('No selected track to remove');
-      return;
-    }
-
-    const nextPlaylist = playlist.filter(track => track.id !== selected.id);
+    const removedIndex = currentPlaylist.findIndex(track => track.id === trackId);
+    const nextPlaylist = currentPlaylist.filter(track => track.id !== trackId);
+    playlistRef.current = nextPlaylist;
     setPlaylist(nextPlaylist);
 
-    if (nextPlaylist.length > 0) {
-      setSelectedTrackId(nextPlaylist[0].id);
-      setCurrentTrackName(nextPlaylist[0].name);
-      setPlaybackState('idle');
-    } else {
-      setSelectedTrackId(null);
-      setCurrentTrackName('None');
-      setPlaybackState('idle');
+    let nextSelectedId = selectedTrackIdRef.current;
+    if (nextSelectedId === trackId) {
+      const replacement = nextPlaylist[Math.min(removedIndex, Math.max(0, nextPlaylist.length - 1))] || null;
+      nextSelectedId = replacement?.id || null;
+      selectedTrackIdRef.current = nextSelectedId;
+      setSelectedTrackId(nextSelectedId);
+      setCurrentTrackName(replacement?.name || 'None');
+      if (nowPlayingTrackId !== trackId) setPlaybackState('idle');
     }
 
-    addLog(`Removed track: ${selected.name}`);
     setTrackTransferStatus(previous => {
       const updated = {...previous};
-      delete updated[selected.id];
+      delete updated[trackId];
       return updated;
     });
-    setTimeout(() => {
-      syncPlaylistSnapshotToNodes(nextPlaylist, nextPlaylist[0]?.id || null);
-    }, 100);
+
+    addLog(`Removed track: ${removed.name}`);
+    syncPlaylistSnapshotToNodes(nextPlaylist, nextSelectedId);
+  };
+
+  const moveTrack = (trackId: string, direction: -1 | 1) => {
+    const nextPlaylist = [...playlistRef.current];
+    const index = nextPlaylist.findIndex(track => track.id === trackId);
+    if (index < 0) return;
+
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= nextPlaylist.length) return;
+
+    [nextPlaylist[index], nextPlaylist[targetIndex]] = [nextPlaylist[targetIndex], nextPlaylist[index]];
+    playlistRef.current = nextPlaylist;
+    setPlaylist(nextPlaylist);
+    syncPlaylistSnapshotToNodes(nextPlaylist, selectedTrackIdRef.current);
+    addLog(`Moved track ${direction < 0 ? 'up' : 'down'}: ${nextPlaylist[targetIndex].name}`);
   };
 
   const playSelectedTrackLocal = async () => {
@@ -1338,8 +1351,6 @@ export default function App() {
       nowPlayingBroadcastTimerRef.current = null;
     }
 
-    await calibrateNodeClocksBeforePlayback();
-
     const liveSockets = clientsRef.current.filter(isSocketUsable);
     if (liveSockets.length === 0) {
       setStatus('No connected speakers');
@@ -1417,9 +1428,9 @@ export default function App() {
     }
 
     // Phase 2: once EVERY live node and the host are primed, give them a fresh
-    // common start point. The 1.5s runway is only scheduling time now, not decode time.
+    // common start point. The 850ms runway is scheduling time only; decode is already complete.
     await calibrateNodeClocksBeforePlayback();
-    const targetTimeMs = Date.now() + 1500;
+    const targetTimeMs = Date.now() + 850;
     const startPayload = {
       id: selected.id,
       name: selected.name,
@@ -2411,7 +2422,8 @@ export default function App() {
       trackTransferStatus={trackTransferStatus}
       addTrack={addTrack}
       addFolder={addFolder}
-      removeSelectedTrack={removeSelectedTrack}
+      removeTrackById={removeTrackById}
+      moveTrack={moveTrack}
       setSelectedTrackId={setSelectedTrackId}
       setCurrentTrackName={setCurrentTrackName}
       addLog={addLog}
