@@ -19,6 +19,7 @@ class DriveAwarePartyAudioModule(
 
     private val partyAudio = PartyAudioModule(reactContext)
     private val driveAudio = DriveAudioModule(reactContext)
+    private val driveFolderPicker = DriveFolderPicker(reactContext)
 
     override fun getName(): String = "PartyAudio"
 
@@ -75,7 +76,7 @@ class DriveAwarePartyAudioModule(
                     partyAudio.pickAudioFolder(promise)
                 }
                 .setNeutralButton("Google Drive") { _, _ ->
-                    driveAudio.pickFolder(promise)
+                    driveFolderPicker.pickFolder(promise)
                 }
                 .setNegativeButton("Cancel") { _, _ ->
                     promise.reject("PICK_FOLDER_CANCELLED", "Folder picking was cancelled")
