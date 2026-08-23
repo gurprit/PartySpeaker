@@ -15,8 +15,7 @@ class MainApplication : Application(), ReactApplication {
       packageList =
         PackageList(this).packages.apply {
             add(MetadataPackage())
-            add(PartyAudioPackage())
-            add(DriveAudioPackage())
+            add(DriveAwarePartyAudioPackage())
         },
     )
   }
