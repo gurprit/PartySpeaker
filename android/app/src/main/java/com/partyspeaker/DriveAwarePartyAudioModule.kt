@@ -21,6 +21,13 @@ class DriveAwarePartyAudioModule(
     @ReactMethod fun removeListeners(count: Int) {}
     @ReactMethod fun getLocalIpAddress(promise: Promise) = partyAudio.getLocalIpAddress(promise)
 
+    // Explicit methods for the React Native source dropdown.
+    @ReactMethod fun pickDeviceAudioFile(promise: Promise) = partyAudio.pickAudioFile(promise)
+    @ReactMethod fun pickDriveAudioFile(promise: Promise) = driveAudio.pickTrack(promise)
+    @ReactMethod fun pickDeviceAudioFolder(promise: Promise) = partyAudio.pickAudioFolder(promise)
+    @ReactMethod fun pickDriveAudioFolder(promise: Promise) = driveFolderPicker.pickFolder(promise)
+
+    // Compatibility fallback for older bundled JS.
     @ReactMethod
     fun pickAudioFile(promise: Promise) {
         val activity = reactContext.currentActivity ?: run {
@@ -53,10 +60,7 @@ class DriveAwarePartyAudioModule(
         }
     }
 
-    @ReactMethod
-    fun cacheDriveFolderTrack(uriString: String, displayName: String, promise: Promise) =
-        driveFolderPicker.cacheDocument(uriString, displayName, promise)
-
+    @ReactMethod fun cacheDriveFolderTrack(uriString: String, displayName: String, promise: Promise) = driveFolderPicker.cacheDocument(uriString, displayName, promise)
     @ReactMethod fun playAudioUri(uriString: String, promise: Promise) = partyAudio.playAudioUri(uriString, promise)
     @ReactMethod fun stopAudioUri(promise: Promise) = partyAudio.stopAudioUri(promise)
     @ReactMethod fun readAudioUriAsBase64(uriString: String, promise: Promise) = partyAudio.readAudioUriAsBase64(uriString, promise)
