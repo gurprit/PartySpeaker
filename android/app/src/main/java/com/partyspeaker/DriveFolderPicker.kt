@@ -64,6 +64,7 @@ class DriveFolderPicker(
             return
         }
 
+        cleanupStaleCache()
         pendingPromise = promise
 
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
@@ -237,6 +238,17 @@ class DriveFolderPicker(
         activity.runOnUiThread {
             Toast.makeText(activity, message, Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun cleanupStaleCache() {
+        val cutoff = System.currentTimeMillis() - (24L * 60L * 60L * 1000L)
+        try {
+            driveCacheDir().listFiles()?.forEach { file ->
+                if (file.lastModified() < cutoff) {
+                    try { file.delete() } catch (_: Exception) {}
+                }
+            }
+        } catch (_: Exception) {}
     }
 
     private fun driveCacheDir(): File {
