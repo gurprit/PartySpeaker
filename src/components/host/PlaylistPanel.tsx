@@ -37,8 +37,8 @@ type Props = {
   setCurrentTrackName: (name: string) => void;
   addLog: (message: string) => void;
   trackTransferStatus: Record<string, number | undefined>;
-  addTrack: () => void;
-  addFolder: () => void;
+  addTrack: (source?: 'device' | 'drive') => void;
+  addFolder: (source?: 'device' | 'drive') => void;
   removeTrackById: (trackId: string) => void;
   moveTrack: (trackId: string, direction: -1 | 1) => void;
   autoSyncAndTransfer: (
@@ -83,6 +83,8 @@ export default function PlaylistPanel({
   selectPreviousTrack,
   selectNextTrack,
 }: Props) {
+  const [sourceMenu, setSourceMenu] = React.useState<'track' | 'folder' | null>(null);
+
   const [metadata, setMetadata] = React.useState<TrackMetadata>({
     title: '',
     artist: 'Unknown Artist',
@@ -234,18 +236,58 @@ export default function PlaylistPanel({
       <View style={localStyles.actionsRow}>
         <PartyButton
           title="＋ Track"
-          onPress={addTrack}
+          onPress={() => setSourceMenu(previous => previous === 'track' ? null : 'track')}
           variant="secondary"
           style={localStyles.actionButton}
         />
 
         <PartyButton
           title="＋ Folder"
-          onPress={addFolder}
+          onPress={() => setSourceMenu(previous => previous === 'folder' ? null : 'folder')}
           variant="secondary"
           style={localStyles.actionButton}
         />
       </View>
+
+      {sourceMenu ? (
+        <View style={localStyles.sourceDropdown}>
+          <TouchableOpacity
+            style={localStyles.sourceOption}
+            activeOpacity={0.76}
+            onPress={() => {
+              const menu = sourceMenu;
+              setSourceMenu(null);
+              if (menu === 'track') addTrack('device');
+              else addFolder('device');
+            }}>
+            <Text style={localStyles.sourceIcon}>{sourceMenu === 'track' ? '🎵' : '📁'}</Text>
+            <View style={localStyles.sourceCopy}>
+              <Text style={localStyles.sourceTitle}>
+                {sourceMenu === 'track' ? 'Device File' : 'Device Folder'}
+              </Text>
+              <Text style={localStyles.sourceSubtitle}>Choose music stored on this phone</Text>
+            </View>
+          </TouchableOpacity>
+
+          <View style={localStyles.sourceDivider} />
+
+          <TouchableOpacity
+            style={[localStyles.sourceOption, localStyles.sourceOptionLast]}
+            activeOpacity={0.76}
+            onPress={() => {
+              const menu = sourceMenu;
+              setSourceMenu(null);
+              if (menu === 'track') addTrack('drive');
+              else addFolder('drive');
+            }}>
+            <Text style={localStyles.sourceIcon}>☁️</Text>
+            <View style={localStyles.sourceCopy}>
+              <Text style={localStyles.sourceTitle}>Google Drive</Text>
+              <Text style={localStyles.sourceSubtitle}>Choose from your Drive music</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
 
       <View style={localStyles.nowPlayingSpacing}>
@@ -533,5 +575,47 @@ const localStyles = StyleSheet.create({
   actionButton: {
     flex: 1,
     minHeight: 72,
+  },
+  sourceDropdown: {
+    marginTop: -4,
+    borderRadius: 18,
+    backgroundColor: partyTheme.cardStrong,
+    borderColor: partyTheme.border,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  sourceOption: {
+    minHeight: 74,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  sourceOptionLast: {
+    paddingBottom: 34,
+  },
+  sourceIcon: {
+    width: 34,
+    fontSize: 24,
+    textAlign: 'center',
+  },
+  sourceCopy: {
+    flex: 1,
+  },
+  sourceTitle: {
+    color: partyTheme.white,
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  sourceSubtitle: {
+    color: partyTheme.muted,
+    fontSize: 13,
+    marginTop: 3,
+  },
+  sourceDivider: {
+    height: 1,
+    backgroundColor: partyTheme.border,
+    marginHorizontal: 18,
   },
 });
