@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.widget.Toast
 import com.facebook.react.bridge.ActivityEventListener
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.BaseActivityEventListener
@@ -11,22 +12,24 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.concurrent.thread
 
 /**
- * Folder-selection fallback for Google Drive.
- *
- * Google's new mobile Drive folder picker currently has awkward bottom-sheet
- * gesture behaviour on some Android devices. ACTION_OPEN_DOCUMENT_TREE uses
- * Android's mature document browser instead, while still allowing Google Drive
- * to act as the backing document provider. Selected audio is copied into the
- * same temporary party_drive cache used by DriveAudioModule before being handed
- * to PartySpeaker's existing playlist/transfer pipeline.
+ * Stable Google Drive folder selection built on Android's document-tree browser.
+ * The returned tree is scanned and copied on a worker thread so large folders do
+ * not block the activity thread. Files are copied sequentially into PartySpeaker's
+ * temporary Drive cache before the existing playlist/transfer pipeline sees them.
  */
 class DriveFolderPicker(
     private val reactContext: ReactApplicationContext
 ) {
     private val requestCode = 9950
     private var pendingPromise: Promise? = null
+
+    private data class PendingAudioDocument(
+        val uri: Uri,
+        val name: String
+    )
 
     private val supportedExtensions = listOf(
         ".mp3", ".m4a", ".aac", ".wav", ".flac", ".ogg", ".opus"
@@ -81,28 +84,71 @@ class DriveFolderPicker(
             return
         }
 
+        val treeUri = data.data!!
         try {
-            val treeUri = data.data!!
-            try {
-                reactContext.contentResolver.takePersistableUriPermission(
-                    treeUri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            } catch (_: Exception) {}
+            reactContext.contentResolver.takePersistableUriPermission(
+                treeUri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (_: Exception) {}
 
-            val result = Arguments.createArray()
-            val rootId = DocumentsContract.getTreeDocumentId(treeUri)
-            collectAudioDocuments(treeUri, rootId, result)
-            promise.resolve(result)
-        } catch (error: Exception) {
-            promise.reject("DRIVE_FOLDER_ERROR", error)
+        showProgress("Scanning music folder…")
+
+        thread(name = "PartySpeakerDriveFolderImport") {
+            try {
+                val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+                val documents = mutableListOf<PendingAudioDocument>()
+                collectAudioDocuments(treeUri, rootId, documents)
+
+                if (documents.isEmpty()) {
+                    showProgress("No supported audio found")
+                    promise.resolve(Arguments.createArray())
+                    return@thread
+                }
+
+                showProgress(
+                    "Found ${documents.size} ${if (documents.size == 1) "track" else "tracks"}"
+                )
+
+                val result = Arguments.createArray()
+                var importedCount = 0
+                var skippedCount = 0
+
+                documents.forEachIndexed { index, document ->
+                    if (
+                        index == 0 ||
+                        index == documents.lastIndex ||
+                        (index + 1) % 5 == 0
+                    ) {
+                        showProgress("Importing ${index + 1}/${documents.size}…")
+                    }
+
+                    try {
+                        val cachedUri = copyToTemporaryCache(document.uri, document.name)
+                        val item = Arguments.createMap()
+                        item.putString("uri", cachedUri)
+                        item.putString("name", document.name)
+                        item.putString("source", "google-drive")
+                        result.pushMap(item)
+                        importedCount += 1
+                    } catch (_: Exception) {
+                        skippedCount += 1
+                    }
+                }
+
+                val suffix = if (skippedCount > 0) " • $skippedCount skipped" else ""
+                showProgress("Imported $importedCount track(s)$suffix")
+                promise.resolve(result)
+            } catch (error: Exception) {
+                promise.reject("DRIVE_FOLDER_ERROR", error)
+            }
         }
     }
 
     private fun collectAudioDocuments(
         treeUri: Uri,
         parentDocumentId: String,
-        result: com.facebook.react.bridge.WritableArray
+        result: MutableList<PendingAudioDocument>
     ) {
         val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
             treeUri,
@@ -141,18 +187,7 @@ class DriveFolderPicker(
                     treeUri,
                     documentId
                 )
-
-                try {
-                    val cachedUri = copyToTemporaryCache(documentUri, name)
-                    val item = Arguments.createMap()
-                    item.putString("uri", cachedUri)
-                    item.putString("name", name)
-                    item.putString("source", "google-drive")
-                    result.pushMap(item)
-                } catch (_: Exception) {
-                    // Match the existing local folder behaviour: skip one bad file,
-                    // don't abort the entire folder import.
-                }
+                result.add(PendingAudioDocument(documentUri, name))
             }
         }
     }
@@ -170,27 +205,38 @@ class DriveFolderPicker(
             "${System.currentTimeMillis()}_${(0..999999).random()}_$safeName"
         )
 
-        val input = reactContext.contentResolver.openInputStream(sourceUri)
-            ?: throw IllegalStateException("Could not open Google Drive file")
+        try {
+            val input = reactContext.contentResolver.openInputStream(sourceUri)
+                ?: throw IllegalStateException("Could not open Google Drive file")
 
-        input.use { source ->
-            FileOutputStream(outputFile).use { output ->
-                val buffer = ByteArray(64 * 1024)
-                while (true) {
-                    val count = source.read(buffer)
-                    if (count < 0) break
-                    output.write(buffer, 0, count)
+            input.use { source ->
+                FileOutputStream(outputFile).use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val count = source.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                    }
+                    output.flush()
                 }
-                output.flush()
             }
-        }
 
-        if (!outputFile.exists() || outputFile.length() <= 0L) {
+            if (!outputFile.exists() || outputFile.length() <= 0L) {
+                throw IllegalStateException("Google Drive file downloaded as an empty temporary file")
+            }
+
+            return Uri.fromFile(outputFile).toString()
+        } catch (error: Exception) {
             try { outputFile.delete() } catch (_: Exception) {}
-            throw IllegalStateException("Google Drive file downloaded as an empty temporary file")
+            throw error
         }
+    }
 
-        return Uri.fromFile(outputFile).toString()
+    private fun showProgress(message: String) {
+        val activity = reactContext.currentActivity ?: return
+        activity.runOnUiThread {
+            Toast.makeText(activity, message, Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun driveCacheDir(): File {
