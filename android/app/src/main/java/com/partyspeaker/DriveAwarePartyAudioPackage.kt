@@ -6,11 +6,15 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.uimanager.ViewManager
 
 class DriveAwarePartyAudioPackage : ReactPackage {
-    override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
+    override fun createNativeModules(
+        reactContext: ReactApplicationContext
+    ): List<NativeModule> {
         return listOf(DriveAwarePartyAudioModule(reactContext))
     }
 
     override fun createViewManagers(
         reactContext: ReactApplicationContext
-    ): List<ViewManager<in Nothing, in Nothing>> = emptyList()
+    ): List<ViewManager<*, *>> {
+        return emptyList()
+    }
 }
