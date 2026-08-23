@@ -43,11 +43,11 @@ class DriveAwarePartyAudioModule(
             AlertDialog.Builder(activity)
                 .setTitle("Add track")
                 .setMessage("Choose where to get the track from")
-                .setItems(arrayOf("Device", "Google Drive")) { _, which ->
-                    when (which) {
-                        0 -> partyAudio.pickAudioFile(promise)
-                        1 -> driveAudio.pickTrack(promise)
-                    }
+                .setPositiveButton("Device") { _, _ ->
+                    partyAudio.pickAudioFile(promise)
+                }
+                .setNeutralButton("Google Drive") { _, _ ->
+                    driveAudio.pickTrack(promise)
                 }
                 .setNegativeButton("Cancel") { _, _ ->
                     promise.reject("PICK_CANCELLED", "Audio picking was cancelled")
@@ -71,11 +71,11 @@ class DriveAwarePartyAudioModule(
             AlertDialog.Builder(activity)
                 .setTitle("Add folder")
                 .setMessage("Choose where to get the folder from")
-                .setItems(arrayOf("Device", "Google Drive")) { _, which ->
-                    when (which) {
-                        0 -> partyAudio.pickAudioFolder(promise)
-                        1 -> driveAudio.pickFolder(promise)
-                    }
+                .setPositiveButton("Device") { _, _ ->
+                    partyAudio.pickAudioFolder(promise)
+                }
+                .setNeutralButton("Google Drive") { _, _ ->
+                    driveAudio.pickFolder(promise)
                 }
                 .setNegativeButton("Cancel") { _, _ ->
                     promise.reject("PICK_FOLDER_CANCELLED", "Folder picking was cancelled")
