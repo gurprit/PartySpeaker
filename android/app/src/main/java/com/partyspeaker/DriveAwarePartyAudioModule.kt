@@ -5,6 +5,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import java.io.File
 
 /**
  * Keeps PartySpeaker's existing audio/playback/transfer implementation intact and
@@ -51,6 +52,9 @@ class DriveAwarePartyAudioModule(
                 .setNegativeButton("Cancel") { _, _ ->
                     promise.reject("PICK_CANCELLED", "Audio picking was cancelled")
                 }
+                .setOnCancelListener {
+                    promise.reject("PICK_CANCELLED", "Audio picking was cancelled")
+                }
                 .show()
         }
     }
@@ -74,6 +78,9 @@ class DriveAwarePartyAudioModule(
                     }
                 }
                 .setNegativeButton("Cancel") { _, _ ->
+                    promise.reject("PICK_FOLDER_CANCELLED", "Folder picking was cancelled")
+                }
+                .setOnCancelListener {
                     promise.reject("PICK_FOLDER_CANCELLED", "Folder picking was cancelled")
                 }
                 .show()
@@ -178,6 +185,9 @@ class DriveAwarePartyAudioModule(
 
     override fun invalidate() {
         partyAudio.invalidate()
+        try {
+            File(reactContext.cacheDir, "party_drive").deleteRecursively()
+        } catch (_: Exception) {}
         super.invalidate()
     }
 }
