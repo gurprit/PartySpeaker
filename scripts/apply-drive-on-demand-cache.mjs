@@ -113,22 +113,16 @@ replaceOnce(
 );
 
 replaceOnce(
-`  const playSelectedTrackOnAllSpeakers = async (trackOverride?: Track) => {
-    const looksLikeTrack =`,
-`  const playSelectedTrackOnAllSpeakers = async (trackOverride?: Track) => {
-    const looksLikeTrack =`,
-'play function anchor',
-);
-
-replaceOnce(
-`    if (clientsRef.current.length === 0) {
+`    const expectedNodeKeys = expectedNodeKeysOverride || getLiveNodeKeys();
+    if (expectedNodeKeys.length === 0) {
       addLog('No nodes connected');
       setStatus('No nodes connected');
       return;
     }
 
-    if (!isTrackCachedOnAllNodes(selected.id)) {`,
-`    if (clientsRef.current.length === 0) {
+    if (!isTrackCachedOnAllNodes(selected.id, expectedNodeKeys)) {`,
+`    const expectedNodeKeys = expectedNodeKeysOverride || getLiveNodeKeys();
+    if (expectedNodeKeys.length === 0) {
       addLog('No nodes connected');
       setStatus('No nodes connected');
       return;
@@ -142,7 +136,7 @@ replaceOnce(
       return;
     }
 
-    if (!isTrackCachedOnAllNodes(selected.id)) {`,
+    if (!isTrackCachedOnAllNodes(selected.id, expectedNodeKeys)) {`,
 'play materialization',
 );
 
