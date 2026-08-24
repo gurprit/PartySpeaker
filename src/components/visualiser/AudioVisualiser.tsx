@@ -1,98 +1,114 @@
-import React, {useEffect, useMemo, useState} from 'react';
-import {StyleSheet, Text, View} from 'react-native';
+import React, {useEffect, useRef, useState} from 'react';
+import {
+  NativeEventEmitter,
+  NativeModules,
+  StyleSheet,
+  View,
+} from 'react-native';
 
-type Props = {
-  isActive: boolean;
-  label?: string;
-  playbackPositionText?: string;
-};
+const {PartyAudio} = NativeModules;
 
 const BAR_COUNT = 28;
+const IDLE_LEVEL = 0.06;
 
-const PATTERN = [
-  0.18, 0.28, 0.44, 0.66, 0.82, 0.95, 0.74,
-  0.52, 0.34, 0.24, 0.38, 0.62, 0.88, 1,
-  0.78, 0.58, 0.42, 0.31, 0.49, 0.71, 0.91,
-  0.84, 0.63, 0.46, 0.29, 0.21, 0.33, 0.56,
-];
-
-function parsePlaybackSeconds(value?: string): number {
-  if (!value) {
-    return 0;
+function normaliseBars(values: unknown): number[] | null {
+  if (!Array.isArray(values) || values.length === 0) {
+    return null;
   }
 
-  const parts = value.split(':').map(part => Number(part.trim()));
+  const numeric = values
+    .map(value => Number(value))
+    .filter(value => Number.isFinite(value));
 
-  if (parts.some(Number.isNaN)) {
-    return 0;
+  if (numeric.length === 0) {
+    return null;
   }
 
-  if (parts.length === 2) {
-    return parts[0] * 60 + parts[1];
-  }
+  return Array.from({length: BAR_COUNT}, (_, index) => {
+    const sourceIndex = Math.min(
+      numeric.length - 1,
+      Math.round((index / Math.max(1, BAR_COUNT - 1)) * (numeric.length - 1)),
+    );
 
-  if (parts.length === 3) {
-    return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  }
-
-  return 0;
+    return Math.max(IDLE_LEVEL, Math.min(1, numeric[sourceIndex]));
+  });
 }
 
-export default function AudioVisualiser({
-  isActive,
-  label,
-  playbackPositionText,
-}: Props) {
-  const [frame, setFrame] = useState(0);
+function shapeLevel(level: number): number[] {
+  const safeLevel = Math.max(0, Math.min(1, level));
 
-  const playbackSeconds = useMemo(
-    () => parsePlaybackSeconds(playbackPositionText),
-    [playbackPositionText],
+  return Array.from({length: BAR_COUNT}, (_, index) => {
+    const centreDistance = Math.abs(index - (BAR_COUNT - 1) / 2) / (BAR_COUNT / 2);
+    const envelope = 0.58 + (1 - centreDistance) * 0.42;
+    const bandTexture = 0.76 + 0.24 * Math.sin(index * 1.67 + safeLevel * 5.4);
+    return Math.max(IDLE_LEVEL, Math.min(1, safeLevel * envelope * bandTexture));
+  });
+}
+
+export default function AudioVisualiser() {
+  const [bars, setBars] = useState<number[]>(
+    Array.from({length: BAR_COUNT}, () => IDLE_LEVEL),
   );
+  const lastSpectrumAtRef = useRef(0);
 
   useEffect(() => {
-    if (!isActive) {
-      setFrame(0);
+    if (!PartyAudio) {
       return;
     }
 
-    const timer = setInterval(() => {
-      setFrame(previous => previous + 1);
-    }, 90);
+    const emitter = new NativeEventEmitter(PartyAudio);
 
-    return () => clearInterval(timer);
-  }, [isActive]);
+    const spectrumSubscription = emitter.addListener(
+      'PartyPlaybackVisuals',
+      (event: {bars?: unknown}) => {
+        const nextBars = normaliseBars(event?.bars);
+        if (!nextBars) {
+          return;
+        }
+
+        lastSpectrumAtRef.current = Date.now();
+        setBars(nextBars);
+      },
+    );
+
+    const levelSubscription = emitter.addListener(
+      'PartyPlaybackLevel',
+      (event: {level?: unknown}) => {
+        if (Date.now() - lastSpectrumAtRef.current < 250) {
+          return;
+        }
+
+        const level = Number(event?.level);
+        if (!Number.isFinite(level)) {
+          return;
+        }
+
+        setBars(shapeLevel(level));
+      },
+    );
+
+    return () => {
+      spectrumSubscription.remove();
+      levelSubscription.remove();
+    };
+  }, []);
 
   return (
-    <View style={styles.wrapper}>
-      <Text style={styles.statusLabel}>
-        {label || (isActive ? 'Visualiser active' : 'Visualiser waiting')}
-      </Text>
-
+    <View style={styles.wrapper} pointerEvents="none">
+      <View style={styles.baseline} />
       <View style={styles.visualiser}>
-        {PATTERN.map((base, index) => {
-          const phase = playbackSeconds * 0.85 + frame * 0.18 + index * 0.55;
-          const wave = (Math.sin(phase) + 1) / 2;
-          const beat = (Math.sin(playbackSeconds * 2.4 + frame * 0.3) + 1) / 2;
-          const energy = isActive
-            ? Math.min(1, base * 0.35 + wave * 0.3 + beat * 0.35)
-            : 0.18;
-
-          const height = 10 + energy * 82;
-
-          return (
-            <View
-              key={index}
-              style={[
-                styles.bar,
-                {
-                  height,
-                  opacity: isActive ? 0.95 : 0.35,
-                },
-              ]}
-            />
-          );
-        })}
+        {bars.map((level, index) => (
+          <View
+            key={index}
+            style={[
+              styles.bar,
+              {
+                height: 5 + level * 70,
+                opacity: 0.38 + level * 0.62,
+              },
+            ]}
+          />
+        ))}
       </View>
     </View>
   );
@@ -100,35 +116,33 @@ export default function AudioVisualiser({
 
 const styles = StyleSheet.create({
   wrapper: {
-    marginVertical: 18,
-    paddingVertical: 12,
-    borderRadius: 24,
-    backgroundColor: 'rgba(57, 255, 20, 0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(57, 255, 20, 0.18)',
+    width: '100%',
+    height: 92,
+    justifyContent: 'center',
+    marginTop: 14,
+    marginBottom: 2,
   },
-  statusLabel: {
-    color: '#8fcf9e',
-    textAlign: 'center',
-    fontSize: 12,
-    marginBottom: 8,
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
+  baseline: {
+    position: 'absolute',
+    left: 4,
+    right: 4,
+    top: '50%',
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
   visualiser: {
-    height: 100,
+    height: 82,
+    paddingHorizontal: 4,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
+    gap: 3,
   },
   bar: {
-    width: 5,
+    flex: 1,
+    maxWidth: 7,
+    minWidth: 3,
     borderRadius: 999,
-    backgroundColor: '#39ff14',
-    shadowColor: '#39ff14',
-    shadowOpacity: 0.8,
-    shadowRadius: 8,
-    elevation: 4,
+    backgroundColor: '#ffffff',
   },
 });
