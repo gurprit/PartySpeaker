@@ -6,96 +6,64 @@ import {
   View,
 } from 'react-native';
 
-const {PartyAudio} = NativeModules;
-
 const BAR_COUNT = 28;
-const IDLE_LEVEL = 0.06;
-
-function normaliseBars(values: unknown): number[] | null {
-  if (!Array.isArray(values) || values.length === 0) {
-    return null;
-  }
-
-  const numeric = values
-    .map(value => Number(value))
-    .filter(value => Number.isFinite(value));
-
-  if (numeric.length === 0) {
-    return null;
-  }
-
-  return Array.from({length: BAR_COUNT}, (_, index) => {
-    const sourceIndex = Math.min(
-      numeric.length - 1,
-      Math.round((index / Math.max(1, BAR_COUNT - 1)) * (numeric.length - 1)),
-    );
-
-    return Math.max(IDLE_LEVEL, Math.min(1, numeric[sourceIndex]));
-  });
-}
-
-function shapeLevel(level: number): number[] {
-  const safeLevel = Math.max(0, Math.min(1, level));
-
-  return Array.from({length: BAR_COUNT}, (_, index) => {
-    const centreDistance = Math.abs(index - (BAR_COUNT - 1) / 2) / (BAR_COUNT / 2);
-    const envelope = 0.58 + (1 - centreDistance) * 0.42;
-    const bandTexture = 0.76 + 0.24 * Math.sin(index * 1.67 + safeLevel * 5.4);
-    return Math.max(IDLE_LEVEL, Math.min(1, safeLevel * envelope * bandTexture));
-  });
-}
+const QUIET_BARS = Array.from({length: BAR_COUNT}, () => 0.035);
+const {PartySpectrum} = NativeModules;
 
 export default function AudioVisualiser() {
-  const [bars, setBars] = useState<number[]>(
-    Array.from({length: BAR_COUNT}, () => IDLE_LEVEL),
-  );
-  const lastSpectrumAtRef = useRef(0);
+  const [bars, setBars] = useState<number[]>(QUIET_BARS);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!PartyAudio) {
-      return;
-    }
+    if (!PartySpectrum) return;
 
-    const emitter = new NativeEventEmitter(PartyAudio);
+    const emitter = new NativeEventEmitter(PartySpectrum);
+    const subscription = emitter.addListener('PartySpectrumFFT', payload => {
+      if (!Array.isArray(payload?.bars)) return;
 
-    const spectrumSubscription = emitter.addListener(
-      'PartyPlaybackVisuals',
-      (event: {bars?: unknown}) => {
-        const nextBars = normaliseBars(event?.bars);
-        if (!nextBars) {
-          return;
+      const next = payload.bars
+        .slice(0, BAR_COUNT)
+        .map((value: unknown) => Math.max(0.025, Math.min(1, Number(value) || 0)));
+
+      if (next.length === BAR_COUNT) {
+        setBars(next);
+      }
+    });
+
+    let cancelled = false;
+    let attempts = 0;
+
+    const start = async () => {
+      if (cancelled) return;
+
+      try {
+        const result = await PartySpectrum.startSpectrum();
+        if (result === 'started') return;
+
+        // Android may still have the system permission dialog on screen.
+        // Retry quietly for a few seconds so granting permission starts the
+        // analyser without requiring an app restart.
+        if ((result === 'permission_requested' || result === 'permission_waiting') && attempts < 12) {
+          attempts += 1;
+          retryTimerRef.current = setTimeout(start, 900);
         }
+      } catch {
+        // Spectrum is a visual enhancement only; playback must remain untouched.
+      }
+    };
 
-        lastSpectrumAtRef.current = Date.now();
-        setBars(nextBars);
-      },
-    );
-
-    const levelSubscription = emitter.addListener(
-      'PartyPlaybackLevel',
-      (event: {level?: unknown}) => {
-        if (Date.now() - lastSpectrumAtRef.current < 250) {
-          return;
-        }
-
-        const level = Number(event?.level);
-        if (!Number.isFinite(level)) {
-          return;
-        }
-
-        setBars(shapeLevel(level));
-      },
-    );
+    start();
 
     return () => {
-      spectrumSubscription.remove();
-      levelSubscription.remove();
+      cancelled = true;
+      subscription.remove();
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      PartySpectrum.stopSpectrum?.().catch?.(() => {});
     };
   }, []);
 
   return (
-    <View style={styles.wrapper} pointerEvents="none">
-      <View style={styles.baseline} />
+    <View style={styles.wrapper}>
       <View style={styles.visualiser}>
         {bars.map((level, index) => (
           <View
@@ -103,8 +71,8 @@ export default function AudioVisualiser() {
             style={[
               styles.bar,
               {
-                height: 5 + level * 70,
-                opacity: 0.38 + level * 0.62,
+                height: 5 + level * 92,
+                opacity: 0.45 + level * 0.55,
               },
             ]}
           />
@@ -117,32 +85,23 @@ export default function AudioVisualiser() {
 const styles = StyleSheet.create({
   wrapper: {
     width: '100%',
-    height: 92,
-    justifyContent: 'center',
-    marginTop: 14,
-    marginBottom: 2,
-  },
-  baseline: {
-    position: 'absolute',
-    left: 4,
-    right: 4,
-    top: '50%',
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    marginTop: 20,
+    marginBottom: 14,
   },
   visualiser: {
-    height: 82,
-    paddingHorizontal: 4,
+    height: 102,
+    width: '100%',
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
     gap: 3,
+    paddingHorizontal: 4,
   },
   bar: {
     flex: 1,
-    maxWidth: 7,
+    maxWidth: 10,
     minWidth: 3,
     borderRadius: 999,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#f3f3f3',
   },
 });
