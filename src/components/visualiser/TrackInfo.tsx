@@ -1,12 +1,17 @@
-import React from 'react';
+import React, {useEffect} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {TrackMetadata} from '../../types/TrackMetadata';
+import {setNowPlayingDisplayMetadata} from './NowPlayingDisplayStore';
 
 type Props = {
   metadata: TrackMetadata;
 };
 
 export default function TrackInfo({metadata}: Props) {
+  useEffect(() => {
+    setNowPlayingDisplayMetadata(metadata);
+  }, [metadata]);
+
   return (
     <View style={styles.container}>
       <Text style={styles.eyebrow}>NOW PLAYING</Text>
