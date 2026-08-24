@@ -1,4 +1,4 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
   NativeEventEmitter,
   NativeModules,
@@ -8,57 +8,32 @@ import {
 
 const BAR_COUNT = 28;
 const QUIET_BARS = Array.from({length: BAR_COUNT}, () => 0.035);
-const {PartySpectrum} = NativeModules;
+const {PartyAudio} = NativeModules;
 
 export default function AudioVisualiser() {
   const [bars, setBars] = useState<number[]>(QUIET_BARS);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!PartySpectrum) return;
+    if (!PartyAudio) return;
 
-    const emitter = new NativeEventEmitter(PartySpectrum);
-    const subscription = emitter.addListener('PartySpectrumFFT', payload => {
+    const emitter = new NativeEventEmitter(PartyAudio);
+    const subscription = emitter.addListener('PartyPlaybackVisuals', payload => {
       if (!Array.isArray(payload?.bars)) return;
 
       const next = payload.bars
         .slice(0, BAR_COUNT)
-        .map((value: unknown) => Math.max(0.025, Math.min(1, Number(value) || 0)));
+        .map((value: unknown) =>
+          Math.max(0.015, Math.min(1, Number(value) || 0)),
+        );
 
       if (next.length === BAR_COUNT) {
         setBars(next);
       }
     });
 
-    let cancelled = false;
-    let attempts = 0;
-
-    const start = async () => {
-      if (cancelled) return;
-
-      try {
-        const result = await PartySpectrum.startSpectrum();
-        if (result === 'started') return;
-
-        // Android may still have the system permission dialog on screen.
-        // Retry quietly for a few seconds so granting permission starts the
-        // analyser without requiring an app restart.
-        if ((result === 'permission_requested' || result === 'permission_waiting') && attempts < 12) {
-          attempts += 1;
-          retryTimerRef.current = setTimeout(start, 900);
-        }
-      } catch {
-        // Spectrum is a visual enhancement only; playback must remain untouched.
-      }
-    };
-
-    start();
-
     return () => {
-      cancelled = true;
       subscription.remove();
-      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
-      PartySpectrum.stopSpectrum?.().catch?.(() => {});
     };
   }, []);
 
