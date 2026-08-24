@@ -297,6 +297,7 @@ export default function PlaylistPanel({
         <NowPlayingArtwork
           title={nowPlayingTrack ? (nowPlayingMetadata.title || nowPlayingTrack.name) : 'Nothing playing'}
           artworkUri={nowPlayingTrack && selectedTrack?.id === nowPlayingTrack.id ? metadata.artworkUri : undefined}
+          displayMode="host"
         />
 
         <TrackInfo metadata={nowPlayingTrack ? nowPlayingMetadata : {title: 'Nothing playing', artist: '', album: ''}} />
