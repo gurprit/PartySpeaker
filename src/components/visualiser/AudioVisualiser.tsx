@@ -12,7 +12,6 @@ const {PartyAudio} = NativeModules;
 
 export default function AudioVisualiser() {
   const [bars, setBars] = useState<number[]>(QUIET_BARS);
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!PartyAudio) return;
