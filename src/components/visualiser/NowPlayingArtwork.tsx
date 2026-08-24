@@ -15,27 +15,15 @@ export default function NowPlayingArtwork({title, artworkUri}: Props) {
 
   return (
     <View style={styles.wrapper}>
-      <View style={styles.stage}>
+      <View style={styles.artworkFrame}>
         {artworkUri ? (
-          <>
-            <Image
-              source={{uri: artworkUri}}
-              style={styles.backdrop}
-              resizeMode="cover"
-              blurRadius={34}
-            />
-            <View style={styles.backdropShade} />
-
-            <View style={styles.artworkFrame}>
-              <Image
-                source={{uri: artworkUri}}
-                style={styles.image}
-                resizeMode="contain"
-              />
-            </View>
-          </>
+          <Image
+            source={{uri: artworkUri}}
+            style={styles.image}
+            resizeMode="contain"
+          />
         ) : (
-          <View style={[styles.artworkFrame, styles.fallbackArtwork]}>
+          <View style={styles.fallbackArtwork}>
             <View style={styles.fallbackHaloOuter}>
               <View style={styles.fallbackHaloInner}>
                 <Text style={styles.symbol}>{initial}</Text>
@@ -55,52 +43,30 @@ const styles = StyleSheet.create({
     width: '100%',
     alignSelf: 'center',
   },
-  stage: {
-    width: '100%',
-    maxWidth: 390,
-    height: 320,
-    alignSelf: 'center',
-    marginTop: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-    borderRadius: 30,
-    backgroundColor: '#090909',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.09)',
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    width: '100%',
-    height: '100%',
-    transform: [{scale: 1.12}],
-    opacity: 0.5,
-  },
-  backdropShade: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.58)',
-  },
   artworkFrame: {
-    width: '88%',
-    height: '86%',
-    borderRadius: 22,
+    width: '100%',
+    maxWidth: 320,
+    aspectRatio: 1,
+    alignSelf: 'center',
+    marginTop: 8,
+    borderRadius: 26,
     overflow: 'hidden',
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#080808',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    shadowColor: '#000',
-    shadowOpacity: 0.72,
-    shadowRadius: 24,
-    elevation: 14,
+    borderColor: 'rgba(255,255,255,0.14)',
   },
   image: {
     width: '100%',
     height: '100%',
   },
   fallbackArtwork: {
-    backgroundColor: '#111411',
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#101210',
   },
   fallbackHaloOuter: {
     width: 184,
