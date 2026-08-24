@@ -26,6 +26,9 @@ import android.provider.DocumentsContract
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import com.facebook.react.bridge.ActivityEventListener
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.BaseActivityEventListener
@@ -76,6 +79,35 @@ class PartyAudioModule(
     }
 
     override fun getName(): String = "PartyAudio"
+
+    private fun createSpectrumExoPlayer(): ExoPlayer {
+        val spectrumProcessor = SpectrumAudioProcessor { bars ->
+            val array = Arguments.createArray()
+            bars.forEach { array.pushDouble(it) }
+            emitPlaybackBars(array)
+        }
+
+        val renderersFactory = object : DefaultRenderersFactory(reactContext) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioOutputPlaybackParams: Boolean,
+            ): AudioSink? {
+                return DefaultAudioSink.Builder(context)
+                    // Keep output as 16-bit PCM so the analyser receives a
+                    // predictable format. The processor is pass-through only.
+                    .setEnableFloatOutput(false)
+                    .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
+                    .setAudioProcessors(arrayOf(spectrumProcessor))
+                    .build()
+            }
+        }
+
+        return ExoPlayer.Builder(reactContext, renderersFactory)
+            .setLooper(Looper.getMainLooper())
+            .build()
+    }
+
 
     @ReactMethod
     fun addListener(eventName: String) {}
@@ -380,7 +412,7 @@ class PartyAudioModule(
                 return
             }
 
-            val player = ExoPlayer.Builder(reactContext).setLooper(Looper.getMainLooper()).build()
+            val player = createSpectrumExoPlayer()
             currentExoPlayer = player
 
             player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
@@ -437,9 +469,7 @@ class PartyAudioModule(
                 return
             }
 
-            val player = ExoPlayer.Builder(reactContext)
-                .setLooper(Looper.getMainLooper())
-                .build()
+            val player = createSpectrumExoPlayer()
             currentExoPlayer = player
             player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
 
@@ -500,9 +530,7 @@ class PartyAudioModule(
         try {
             stopCurrentPlayer()
 
-            val player = ExoPlayer.Builder(reactContext)
-                .setLooper(Looper.getMainLooper())
-                .build()
+            val player = createSpectrumExoPlayer()
             currentExoPlayer = player
 
             val uri = Uri.parse(uriString)
@@ -570,7 +598,7 @@ class PartyAudioModule(
                 return
             }
 
-            val player = ExoPlayer.Builder(reactContext).setLooper(Looper.getMainLooper()).build()
+            val player = createSpectrumExoPlayer()
             standbyExoPlayer = player
             player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
             var settled = false
@@ -609,7 +637,7 @@ class PartyAudioModule(
         try {
             try { standbyExoPlayer?.release() } catch (_: Exception) {}
             standbyExoPlayer = null
-            val player = ExoPlayer.Builder(reactContext).setLooper(Looper.getMainLooper()).build()
+            val player = createSpectrumExoPlayer()
             standbyExoPlayer = player
             player.setMediaItem(MediaItem.fromUri(Uri.parse(uriString)))
             var settled = false
@@ -674,7 +702,7 @@ class PartyAudioModule(
                 promise.reject("CACHED_TRACK_MISSING", "Cached track not found")
                 return
             }
-            val player = ExoPlayer.Builder(reactContext).setLooper(Looper.getMainLooper()).build()
+            val player = createSpectrumExoPlayer()
             currentExoPlayer = player
             player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
             var settled = false
@@ -715,7 +743,7 @@ class PartyAudioModule(
         }
         try {
             stopCurrentPlayer()
-            val player = ExoPlayer.Builder(reactContext).setLooper(Looper.getMainLooper()).build()
+            val player = createSpectrumExoPlayer()
             currentExoPlayer = player
             player.setMediaItem(MediaItem.fromUri(Uri.parse(uriString)))
             var settled = false
@@ -759,36 +787,9 @@ class PartyAudioModule(
     }
 
     private fun startPlaybackLevelEvents() {
-        if (playbackLevelRunning) {
-            return
-        }
-
-        playbackLevelRunning = true
-
-        val runnable = object : Runnable {
-            override fun run() {
-                val player = currentExoPlayer
-
-                if (!playbackLevelRunning || player == null) {
-                    playbackLevelRunning = false
-                    return
-                }
-
-                val position = player.currentPosition.coerceAtLeast(0L)
-
-                // Temporary deterministic level based on playback position.
-                // Next step: replace with true FFT/audio processor data.
-                val level = ((kotlin.math.sin(position / 130.0) + 1.0) / 2.0)
-                    .coerceIn(0.0, 1.0)
-
-                emitPlaybackLevel(level)
-
-                playbackLevelHandler?.postDelayed(this, 50)
-            }
-        }
-
-        playbackLevelHandler = Handler(Looper.getMainLooper())
-        playbackLevelHandler?.post(runnable)
+        // Spectrum data now comes directly from decoded PCM via
+        // SpectrumAudioProcessor. Kept as a no-op so existing playback call
+        // sites remain untouched and synchronization behaviour is unchanged.
     }
 
     private fun stopPlaybackLevelEvents() {
@@ -869,7 +870,7 @@ class PartyAudioModule(
                 return
             }
 
-            val player = ExoPlayer.Builder(reactContext).setLooper(Looper.getMainLooper()).build()
+            val player = createSpectrumExoPlayer()
             currentExoPlayer = player
 
             player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
