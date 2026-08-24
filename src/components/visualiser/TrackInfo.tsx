@@ -9,7 +9,9 @@ type Props = {
 export default function TrackInfo({metadata}: Props) {
   return (
     <View style={styles.container}>
-      <Text style={styles.title} numberOfLines={1}>
+      <Text style={styles.eyebrow}>NOW PLAYING</Text>
+
+      <Text style={styles.title} numberOfLines={2}>
         {metadata.title || 'Unknown Track'}
       </Text>
 
@@ -17,34 +19,49 @@ export default function TrackInfo({metadata}: Props) {
         {metadata.artist || 'Unknown Artist'}
       </Text>
 
-      <Text style={styles.album} numberOfLines={1}>
-        {metadata.album || 'Unknown Album'}
-      </Text>
+      {metadata.album ? (
+        <Text style={styles.album} numberOfLines={1}>
+          {metadata.album}
+        </Text>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container:{
-    alignItems:'center',
-    marginBottom:18,
+  container: {
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    marginTop: 4,
+    marginBottom: 20,
   },
-
-  title:{
-    color:'white',
-    fontSize:30,
-    fontWeight:'700',
+  eyebrow: {
+    color: 'rgba(255,255,255,0.46)',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 2.1,
+    marginBottom: 10,
   },
-
-  artist:{
-    color:'#bfbfbf',
-    marginTop:6,
-    fontSize:17,
+  title: {
+    color: '#ffffff',
+    fontSize: 34,
+    lineHeight: 39,
+    fontWeight: '900',
+    letterSpacing: -1.1,
+    textAlign: 'center',
   },
-
-  album:{
-    color:'#7c7c7c',
-    marginTop:2,
-    fontSize:14,
-  }
+  artist: {
+    color: 'rgba(255,255,255,0.76)',
+    marginTop: 9,
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  album: {
+    color: 'rgba(255,255,255,0.38)',
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
 });
