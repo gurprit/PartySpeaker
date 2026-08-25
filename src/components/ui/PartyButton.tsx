@@ -24,6 +24,7 @@ export default function PartyButton({
 }: Props) {
   const primary = variant === 'primary';
   const flattenedStyle = StyleSheet.flatten(style) || {};
+  const inButtonRow = Number(flattenedStyle.flex || 0) > 0;
 
   const button = (buttonStyle?: ViewStyle) => (
     <TouchableOpacity
@@ -44,16 +45,18 @@ export default function PartyButton({
     </TouchableOpacity>
   );
 
+  // The Node footer is still hosted inside an older horizontal row in App.tsx.
+  // Take Disconnect out of that row's normal layout so the Back component can
+  // occupy the full width beneath it with Storage in the middle. This gives the
+  // compact screens a true vertical footer without touching playback-heavy App.tsx.
+  if (title === 'Disconnect' && inButtonRow) {
+    return button(styles.nodeDisconnect);
+  }
+
   // Host and Node screens both end with Back. Keep storage beside those footer
   // actions, but stack it vertically so narrow phones never squash the labels.
   if (title === 'Back') {
-    const inButtonRow = Number(flattenedStyle.flex || 0) > 0;
-
     if (inButtonRow) {
-      // Node: the parent row already contains Disconnect. This wrapper expands
-      // to full width and stacks Storage + Back beneath it. The parent can wrap
-      // this block naturally on compact screens while keeping button styling
-      // consistent with the Host footer.
       return (
         <View style={styles.nodeBackGroup}>
           <StorageButton style={{width: '100%'}} />
@@ -108,10 +111,19 @@ const styles = StyleSheet.create({
   secondaryText: {
     color: partyTheme.text,
   },
+  nodeDisconnect: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    width: '100%',
+    zIndex: 2,
+  },
   nodeBackGroup: {
     flex: 1,
     width: '100%',
     gap: 12,
+    marginTop: 88,
   },
   hostBackGroup: {
     gap: 12,
