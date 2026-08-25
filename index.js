@@ -2,8 +2,19 @@
  * @format
  */
 
-import { AppRegistry } from 'react-native';
+import React from 'react';
+import {AppRegistry, View} from 'react-native';
 import App from './App';
-import { name as appName } from './app.json';
+import StorageManager from './src/components/common/StorageManager';
+import {name as appName} from './app.json';
 
-AppRegistry.registerComponent(appName, () => App);
+function PartySpeakerRoot() {
+  return (
+    <View style={{flex: 1}}>
+      <App />
+      <StorageManager />
+    </View>
+  );
+}
+
+AppRegistry.registerComponent(appName, () => PartySpeakerRoot);
