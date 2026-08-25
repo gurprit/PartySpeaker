@@ -44,26 +44,26 @@ export default function PartyButton({
     </TouchableOpacity>
   );
 
-  // PartySpeaker's Host and Node screens both finish with a Back action. Keep
-  // storage management alongside those controls instead of floating over the
-  // Android system navigation area where it can be hard to see/tap.
+  // Host and Node screens both end with Back. Keep storage beside those footer
+  // actions, but stack it vertically so narrow phones never squash the labels.
   if (title === 'Back') {
     const inButtonRow = Number(flattenedStyle.flex || 0) > 0;
 
     if (inButtonRow) {
-      // Node: parent already contains Disconnect (flex 1). This wrapper takes
-      // two shares, then splits them evenly into Storage + Back, producing
-      // three equal actions across the row.
+      // Node: the parent row already contains Disconnect. This wrapper expands
+      // to full width and stacks Storage + Back beneath it. The parent can wrap
+      // this block naturally on compact screens while keeping button styling
+      // consistent with the Host footer.
       return (
         <View style={styles.nodeBackGroup}>
-          <StorageButton style={{flex: 1}} />
-          {button({flex: 1})}
+          <StorageButton style={{width: '100%'}} />
+          {button({width: '100%'})}
         </View>
       );
     }
 
-    // Host: Stop Hosting is above this component. Keep Storage directly between
-    // Stop Hosting and Back, matching the same full-width secondary treatment.
+    // Host: Stop Hosting sits directly above this component, so Storage and
+    // Back continue vertically underneath it in the same secondary style.
     return (
       <View
         style={[
@@ -109,8 +109,8 @@ const styles = StyleSheet.create({
     color: partyTheme.text,
   },
   nodeBackGroup: {
-    flex: 2,
-    flexDirection: 'row',
+    flex: 1,
+    width: '100%',
     gap: 12,
   },
   hostBackGroup: {
