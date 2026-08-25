@@ -47,9 +47,9 @@ export default function StorageManager() {
   const [loading, setLoading] = useState(false);
   const [purging, setPurging] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (showLoading = true) => {
     if (!PartyStorage?.getTemporaryStorageInfo) return;
-    setLoading(true);
+    if (showLoading) setLoading(true);
     try {
       const result = await PartyStorage.getTemporaryStorageInfo();
       setInfo({
@@ -63,17 +63,26 @@ export default function StorageManager() {
     } catch {
       // Storage transparency is helpful but must never interfere with playback.
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    refresh();
+    refresh(false);
+
+    // Keep the pill and open breakdown current as tracks are downloaded or
+    // Drive files are materialised. This is intentionally just a cheap local
+    // directory-size read and never touches playback/network state.
+    const timer = setInterval(() => {
+      refresh(false);
+    }, 2000);
+
+    return () => clearInterval(timer);
   }, [refresh]);
 
   const open = async () => {
     setVisible(true);
-    await refresh();
+    await refresh(true);
   };
 
   const purge = () => {
@@ -91,7 +100,7 @@ export default function StorageManager() {
             try {
               const result = await PartyStorage.purgeTemporaryFiles();
               const freedBytes = Number(result?.freedBytes) || 0;
-              await refresh();
+              await refresh(false);
               Alert.alert(
                 'Temporary files cleared',
                 `Freed ${formatBytes(freedBytes)} of storage.`,
@@ -179,7 +188,7 @@ export default function StorageManager() {
             <TouchableOpacity
               activeOpacity={0.8}
               style={styles.refreshButton}
-              onPress={refresh}
+              onPress={() => refresh(true)}
               disabled={loading || purging}>
               <Text style={styles.refreshText}>{loading ? 'Checking storage…' : 'Refresh size'}</Text>
             </TouchableOpacity>
