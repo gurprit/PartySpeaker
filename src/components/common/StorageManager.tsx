@@ -4,11 +4,11 @@ import {
   Modal,
   NativeModules,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
+  ViewStyle,
 } from 'react-native';
 
 const {PartyStorage} = NativeModules;
@@ -34,14 +34,22 @@ const EMPTY_INFO: StorageInfo = {
 function formatBytes(bytes: number): string {
   const value = Math.max(0, Number(bytes) || 0);
   if (value < 1024) return `${Math.round(value)} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`;
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`;
+  }
   if (value < 1024 * 1024 * 1024) {
-    return `${(value / (1024 * 1024)).toFixed(value < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+    return `${(value / (1024 * 1024)).toFixed(
+      value < 10 * 1024 * 1024 ? 1 : 0,
+    )} MB`;
   }
   return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-export default function StorageManager() {
+type StorageButtonProps = {
+  style?: ViewStyle;
+};
+
+export function StorageButton({style}: StorageButtonProps) {
   const [info, setInfo] = useState<StorageInfo>(EMPTY_INFO);
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -61,7 +69,7 @@ export default function StorageManager() {
         totalFiles: Number(result?.totalFiles) || 0,
       });
     } catch {
-      // Storage transparency is helpful but must never interfere with playback.
+      // Storage UI must never interfere with playback.
     } finally {
       if (showLoading) setLoading(false);
     }
@@ -70,13 +78,8 @@ export default function StorageManager() {
   useEffect(() => {
     refresh(false);
 
-    // Keep the pill and open breakdown current as tracks are downloaded or
-    // Drive files are materialised. This is intentionally just a cheap local
-    // directory-size read and never touches playback/network state.
-    const timer = setInterval(() => {
-      refresh(false);
-    }, 2000);
-
+    // Keep the visible size current as host/Drive downloads land on the phone.
+    const timer = setInterval(() => refresh(false), 2000);
     return () => clearInterval(timer);
   }, [refresh]);
 
@@ -120,19 +123,16 @@ export default function StorageManager() {
 
   return (
     <>
-      <SafeAreaView pointerEvents="box-none" style={styles.overlay}>
-        <TouchableOpacity
-          activeOpacity={0.78}
-          style={styles.pill}
-          onPress={open}
-          accessibilityRole="button"
-          accessibilityLabel={`PartySpeaker temporary storage ${formatBytes(info.totalBytes)}`}>
-          <Text style={styles.pillIcon}>▣</Text>
-          <Text style={styles.pillText}>
-            {loading && info.totalBytes === 0 ? 'Storage' : formatBytes(info.totalBytes)}
-          </Text>
-        </TouchableOpacity>
-      </SafeAreaView>
+      <TouchableOpacity
+        activeOpacity={0.82}
+        style={[styles.inlineButton, style]}
+        onPress={open}
+        accessibilityRole="button"
+        accessibilityLabel={`PartySpeaker storage ${formatBytes(info.totalBytes)}`}>
+        <Text style={styles.inlineButtonText} numberOfLines={1}>
+          Storage{info.totalBytes > 0 ? ` · ${formatBytes(info.totalBytes)}` : ''}
+        </Text>
+      </TouchableOpacity>
 
       <Modal
         transparent
@@ -150,7 +150,9 @@ export default function StorageManager() {
                   {info.totalFiles} temporary {info.totalFiles === 1 ? 'file' : 'files'} on this device
                 </Text>
               </View>
-              <TouchableOpacity style={styles.closeButton} onPress={() => setVisible(false)}>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setVisible(false)}>
                 <Text style={styles.closeText}>×</Text>
               </TouchableOpacity>
             </View>
@@ -159,10 +161,14 @@ export default function StorageManager() {
               <View style={styles.storageRow}>
                 <View style={{flex: 1}}>
                   <Text style={styles.rowTitle}>Speaker cache</Text>
-                  <Text style={styles.rowDescription}>Tracks downloaded from a PartySpeaker host</Text>
+                  <Text style={styles.rowDescription}>
+                    Tracks downloaded from a PartySpeaker host
+                  </Text>
                 </View>
                 <View style={styles.valueWrap}>
-                  <Text style={styles.rowValue}>{formatBytes(info.speakerCacheBytes)}</Text>
+                  <Text style={styles.rowValue}>
+                    {formatBytes(info.speakerCacheBytes)}
+                  </Text>
                   <Text style={styles.fileCount}>{info.speakerCacheFiles} files</Text>
                 </View>
               </View>
@@ -172,7 +178,9 @@ export default function StorageManager() {
               <View style={styles.storageRow}>
                 <View style={{flex: 1}}>
                   <Text style={styles.rowTitle}>Google Drive temp</Text>
-                  <Text style={styles.rowDescription}>Drive tracks materialised for playback or transfer</Text>
+                  <Text style={styles.rowDescription}>
+                    Drive tracks materialised for playback or transfer
+                  </Text>
                 </View>
                 <View style={styles.valueWrap}>
                   <Text style={styles.rowValue}>{formatBytes(info.driveCacheBytes)}</Text>
@@ -190,16 +198,25 @@ export default function StorageManager() {
               style={styles.refreshButton}
               onPress={() => refresh(true)}
               disabled={loading || purging}>
-              <Text style={styles.refreshText}>{loading ? 'Checking storage…' : 'Refresh size'}</Text>
+              <Text style={styles.refreshText}>
+                {loading ? 'Checking storage…' : 'Refresh size'}
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               activeOpacity={0.8}
-              style={[styles.deleteButton, (purging || info.totalBytes <= 0) && styles.disabledButton]}
+              style={[
+                styles.deleteButton,
+                (purging || info.totalBytes <= 0) && styles.disabledButton,
+              ]}
               onPress={purge}
               disabled={purging || info.totalBytes <= 0}>
               <Text style={styles.deleteText}>
-                {purging ? 'Deleting…' : info.totalBytes > 0 ? `Delete ${formatBytes(info.totalBytes)} temporary files` : 'No temporary files to delete'}
+                {purging
+                  ? 'Deleting…'
+                  : info.totalBytes > 0
+                    ? `Delete ${formatBytes(info.totalBytes)} temporary files`
+                    : 'No temporary files to delete'}
               </Text>
             </TouchableOpacity>
           </Pressable>
@@ -209,37 +226,28 @@ export default function StorageManager() {
   );
 }
 
+// The old root-level floating storage control is intentionally disabled.
+// Storage is now surfaced inline with Host/Node controls via PartyButton.
+export default function StorageManager() {
+  return null;
+}
+
 const styles = StyleSheet.create({
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 1000,
-    elevation: 1000,
-    alignItems: 'flex-end',
-    pointerEvents: 'box-none',
-  },
-  pill: {
-    marginTop: 6,
-    marginRight: 14,
-    minHeight: 34,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    flexDirection: 'row',
+  inlineButton: {
+    minHeight: 76,
+    borderRadius: 18,
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 7,
-    backgroundColor: 'rgba(16,16,16,0.94)',
-    borderWidth: 1,
+    paddingHorizontal: 14,
+    backgroundColor: '#202020',
     borderColor: 'rgba(255,255,255,0.16)',
+    borderWidth: 1,
   },
-  pillIcon: {
-    color: '#ffffff',
-    fontSize: 11,
-    fontWeight: '900',
-  },
-  pillText: {
-    color: 'rgba(255,255,255,0.78)',
-    fontSize: 11,
+  inlineButtonText: {
+    color: '#f3f3f3',
+    fontSize: 17,
     fontWeight: '800',
-    letterSpacing: 0.2,
+    textAlign: 'center',
   },
   backdrop: {
     flex: 1,
