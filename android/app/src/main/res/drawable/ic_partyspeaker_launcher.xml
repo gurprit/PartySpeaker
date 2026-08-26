@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#000000"
+        android:pathData="M0,0H108V108H0Z" />
+
+    <!-- top speaker -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M54,13 A9,9 0,1 1,53.99,13 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,18 A2.4,2.4 0,1 1,53.99,18 Z" />
+
+    <!-- centre speaker -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M54,42 A13,13 0,1 1,53.99,42 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,50.5 A4.5,4.5 0,1 1,53.99,50.5 Z" />
+
+    <!-- lower-left speaker -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M25,68 A8.5,8.5 0,1 1,24.99,68 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M25,73 A2.3,2.3 0,1 1,24.99,73 Z" />
+
+    <!-- lower-right speaker -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M83,68 A8.5,8.5 0,1 1,82.99,68 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M83,73 A2.3,2.3 0,1 1,82.99,73 Z" />
+
+    <!-- connectors -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M54,33 L54,36" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M37,64 L39.5,62.5" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M71,62.5 L73.5,64" />
+
+    <!-- upper radiating waves -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:pathData="M20,57 A35,35 0,0 1,37,28" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:pathData="M28,57 A27,27 0,0 1,40,35" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:pathData="M35.5,57 A19.5,19.5 0,0 1,43,42" />
+
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:pathData="M71,28 A35,35 0,0 1,88,57" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:pathData="M68,35 A27,27 0,0 1,80,57" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:pathData="M65,42 A19.5,19.5 0,0 1,72.5,57" />
+
+    <!-- lower radiating waves -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:pathData="M42,68 A18,18 0,0 0,66,68" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:pathData="M37,75 A26,26 0,0 0,71,75" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:pathData="M32,82 A34,34 0,0 0,76,82" />
+
+</vector>
