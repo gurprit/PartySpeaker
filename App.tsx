@@ -2598,11 +2598,14 @@ export default function App() {
 
         <Text
           style={{
-            color: partyTheme.white,
+            color: partyTheme.accent,
             fontSize: 112,
             lineHeight: 116,
             fontWeight: '900',
-            letterSpacing: -6,
+            fontFamily: 'monospace',
+            textShadowColor: partyTheme.accentDim,
+            textShadowRadius: 18,
+            letterSpacing: 4,
             textAlign: 'center',
           }}>
           {partyCode || '...'}
@@ -3047,11 +3050,12 @@ export default function App() {
     <SafeAreaView style={styles.screen}>
       <View style={[styles.homeContent, {alignItems: 'stretch', paddingHorizontal: 24}]}>
         <Text style={{
-          color: partyTheme.white,
+          color: partyTheme.accent,
           fontSize: 54,
           lineHeight: 58,
           fontWeight: '900',
-          letterSpacing: -2,
+          fontFamily: 'monospace',
+          letterSpacing: -1,
           textAlign: 'center',
           marginBottom: 10,
         }}>
@@ -3090,7 +3094,7 @@ export default function App() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#050505',
+    backgroundColor: partyTheme.bg,
   },
   homeContent: {
     flex: 1,

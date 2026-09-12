@@ -11,6 +11,7 @@ import MetadataService from '../../services/MetadataService';
 import {TrackMetadata} from '../../types/TrackMetadata';
 import NowPlayingArtwork from '../visualiser/NowPlayingArtwork';
 import TrackInfo from '../visualiser/TrackInfo';
+import RetroSpectrum from '../visualiser/RetroSpectrum';
 import PartyButton from '../ui/PartyButton';
 import PartyCard from '../ui/PartyCard';
 import SectionLabel from '../ui/SectionLabel';
@@ -294,6 +295,8 @@ export default function PlaylistPanel({
       <SectionLabel>Now Playing</SectionLabel>
 
       <PartyCard style={localStyles.nowPlayingCard}>
+        <RetroSpectrum active={playbackState === 'playing'} />
+
         <NowPlayingArtwork
           title={nowPlayingTrack ? (nowPlayingMetadata.title || nowPlayingTrack.name) : 'Nothing playing'}
           artworkUri={nowPlayingTrack && selectedTrack?.id === nowPlayingTrack.id ? metadata.artworkUri : undefined}
@@ -384,6 +387,8 @@ const localStyles = StyleSheet.create({
   },
   nowPlayingCard: {
     padding: 18,
+    backgroundColor: partyTheme.lcd,
+    borderColor: partyTheme.accentDim,
   },
   progressRow: {
     marginTop: 12,
@@ -401,7 +406,10 @@ const localStyles = StyleSheet.create({
   progressInner: {
     height: '100%',
     borderRadius: 999,
-    backgroundColor: partyTheme.white,
+    backgroundColor: partyTheme.accent,
+    shadowColor: partyTheme.accent,
+    shadowOpacity: 0.7,
+    shadowRadius: 6,
   },
   timeText: {
     color: partyTheme.muted,
@@ -416,15 +424,20 @@ const localStyles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   controlIcon: {
-    color: partyTheme.white,
-    fontSize: 34,
+    color: partyTheme.accentSoft,
+    fontSize: 30,
     fontWeight: '800',
   },
   playButton: {
     width: 76,
     height: 76,
-    borderRadius: 38,
-    backgroundColor: partyTheme.white,
+    borderRadius: 12,
+    backgroundColor: partyTheme.hardwareRaised,
+    borderWidth: 1,
+    borderColor: partyTheme.accent,
+    shadowColor: partyTheme.accent,
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -432,7 +445,7 @@ const localStyles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.18)',
   },
   playButtonText: {
-    color: partyTheme.black,
+    color: partyTheme.accent,
     fontSize: 32,
     fontWeight: '900',
   },
@@ -490,7 +503,13 @@ const localStyles = StyleSheet.create({
     gap: 14,
   },
   trackRowSelected: {
-    backgroundColor: partyTheme.white,
+    backgroundColor: partyTheme.cardStrong,
+    borderColor: partyTheme.accent,
+    borderWidth: 1,
+    shadowColor: partyTheme.accent,
+    shadowOpacity: 0.42,
+    shadowRadius: 10,
+    elevation: 5,
   },
   trackIndex: {
     color: partyTheme.white,
@@ -499,7 +518,7 @@ const localStyles = StyleSheet.create({
     width: 28,
   },
   trackIndexSelected: {
-    color: partyTheme.black,
+    color: partyTheme.accent,
   },
   trackArtworkMini: {
     width: 54,
@@ -520,7 +539,7 @@ const localStyles = StyleSheet.create({
     fontWeight: '900',
   },
   trackArtworkTextSelected: {
-    color: partyTheme.black,
+    color: partyTheme.accent,
   },
   trackTextWrap: {
     flex: 1,
@@ -531,7 +550,9 @@ const localStyles = StyleSheet.create({
     fontWeight: '900',
   },
   trackTitleSelected: {
-    color: partyTheme.black,
+    color: partyTheme.accentSoft,
+    textShadowColor: partyTheme.accentDim,
+    textShadowRadius: 6,
   },
   trackMeta: {
     color: partyTheme.muted,
@@ -539,7 +560,7 @@ const localStyles = StyleSheet.create({
     marginTop: 3,
   },
   trackMetaSelected: {
-    color: 'rgba(0,0,0,0.55)',
+    color: partyTheme.muted,
   },
   rowActions: {
     flexDirection: 'row',
@@ -563,7 +584,7 @@ const localStyles = StyleSheet.create({
     textAlign: 'center',
   },
   rowActionSelected: {
-    color: 'rgba(0,0,0,0.62)',
+    color: partyTheme.accentSoft,
   },
   rowActionDisabled: {
     opacity: 0.22,
