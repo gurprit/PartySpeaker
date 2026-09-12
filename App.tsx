@@ -2,6 +2,7 @@ import PanelHeader from './src/components/common/PanelHeader';
 import NodeDelayCalibration from './src/components/node/NodeDelayCalibration';
 import NodeStatusPanel from './src/components/node/NodeStatusPanel';
 import PlaylistPanel from './src/components/host/PlaylistPanel';
+import RetroHostStatus from './src/components/host/RetroHostStatus';
 import EventLog from './src/components/host/EventLog';
 import NowPlayingArtwork from './src/components/visualiser/NowPlayingArtwork';
 import TrackInfo from './src/components/visualiser/TrackInfo';
@@ -2593,75 +2594,14 @@ export default function App() {
       status.toLowerCase().includes('listening');
 
     return (
-      <View style={{width: '100%', gap: 18}}>
-        <SectionLabel>Party Code</SectionLabel>
-
-        <Text
-          style={{
-            color: partyTheme.accent,
-            fontSize: 112,
-            lineHeight: 116,
-            fontWeight: '900',
-            fontFamily: 'monospace',
-            textShadowColor: partyTheme.accentDim,
-            textShadowRadius: 18,
-            letterSpacing: 4,
-            textAlign: 'center',
-          }}>
-          {partyCode || '...'}
-        </Text>
-
-        <PartyCard
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            paddingVertical: 18,
-          }}>
-          <Text style={{color: partyTheme.muted, fontSize: 16}}>
-            📡 {hostLocalIp}:5050
-          </Text>
-
-          <Text style={{color: partyTheme.muted, fontSize: 16}}>
-            👤 {nodeCount} {nodeCount === 1 ? 'speaker' : 'speakers'}
-          </Text>
-        </PartyCard>
-
-        <PartyButton
-          title={isHosting ? '✅  Hosting Active' : '📡  Start Hosting'}
-          onPress={startHostServer}
-        />
-
-        <PartyCard
-          style={{
-            paddingVertical: 14,
-            backgroundColor: isHosting
-              ? 'rgba(255,255,255,0.075)'
-              : 'rgba(255,255,255,0.045)',
-          }}>
-          <Text
-            style={{
-              color: isHosting ? partyTheme.white : partyTheme.muted,
-              fontSize: 15,
-              fontWeight: '700',
-              textAlign: 'center',
-            }}>
-            {isHosting
-              ? `Ready for speakers to join${nodeCount > 0 ? ` • ${nodeCount} connected` : ''}`
-              : 'Tap Start Hosting to open the party'}
-          </Text>
-
-          <Text
-            style={{
-              color: partyTheme.faint,
-              fontSize: 12,
-              marginTop: 6,
-              textAlign: 'center',
-            }}>
-            {status}
-          </Text>
-        </PartyCard>
-      </View>
+      <RetroHostStatus
+        partyCode={partyCode}
+        hostLocalIp={hostLocalIp}
+        nodeCount={nodeCount}
+        status={status}
+        isHosting={isHosting}
+        onStartHosting={startHostServer}
+      />
     );
   };
 
