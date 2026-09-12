@@ -29,12 +29,13 @@ export default function PartyButton({
   const button = (buttonStyle?: ViewStyle) => (
     <TouchableOpacity
       onPress={onPress}
-      activeOpacity={0.82}
+      activeOpacity={0.72}
       style={[
         styles.button,
         primary ? styles.primary : styles.secondary,
         buttonStyle,
       ]}>
+      <View style={styles.buttonInset} />
       <Text
         style={[
           styles.text,
@@ -45,16 +46,10 @@ export default function PartyButton({
     </TouchableOpacity>
   );
 
-  // The Node footer is still hosted inside an older horizontal row in App.tsx.
-  // Take Disconnect out of that row's normal layout so the Back component can
-  // occupy the full width beneath it with Storage in the middle. This gives the
-  // compact screens a true vertical footer without touching playback-heavy App.tsx.
   if (title === 'Disconnect' && inButtonRow) {
     return button(styles.nodeDisconnect);
   }
 
-  // Host and Node screens both end with Back. Keep storage beside those footer
-  // actions, but stack it vertically so narrow phones never squash the labels.
   if (title === 'Back') {
     if (inButtonRow) {
       return (
@@ -65,8 +60,6 @@ export default function PartyButton({
       );
     }
 
-    // Host: Stop Hosting sits directly above this component, so Storage and
-    // Back continue vertically underneath it in the same secondary style.
     return (
       <View
         style={[
@@ -87,29 +80,46 @@ export default function PartyButton({
 
 const styles = StyleSheet.create({
   button: {
-    minHeight: 76,
-    borderRadius: 18,
+    minHeight: 68,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 22,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  buttonInset: {
+    position: 'absolute',
+    top: 3,
+    left: 4,
+    right: 4,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
   primary: {
-    backgroundColor: partyTheme.white,
+    backgroundColor: partyTheme.accent,
+    borderColor: partyTheme.accentSoft,
+    shadowColor: partyTheme.accent,
+    shadowOpacity: 0.48,
+    shadowRadius: 12,
+    elevation: 8,
   },
   secondary: {
-    backgroundColor: partyTheme.card,
-    borderColor: partyTheme.border,
-    borderWidth: 1,
+    backgroundColor: partyTheme.hardwareRaised,
+    borderColor: partyTheme.accentDim,
   },
   text: {
-    fontSize: 21,
-    fontWeight: '800',
+    fontSize: 17,
+    fontWeight: '900',
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+    fontFamily: 'monospace',
   },
   primaryText: {
-    color: partyTheme.black,
+    color: '#16060b',
   },
   secondaryText: {
-    color: partyTheme.text,
+    color: partyTheme.accentSoft,
   },
   nodeDisconnect: {
     position: 'absolute',
@@ -123,7 +133,7 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     gap: 12,
-    marginTop: 88,
+    marginTop: 80,
   },
   hostBackGroup: {
     gap: 12,
