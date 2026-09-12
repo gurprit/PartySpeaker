@@ -1,0 +1,56 @@
+name: Apply retro host deck
+
+on:
+  push:
+    branches: [redesign/retro-hifi]
+    paths:
+      - '.github/workflows/apply-retro-host-deck.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: redesign/retro-hifi
+          fetch-depth: 0
+      - name: Patch App.tsx
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('App.tsx')
+          text = path.read_text()
+
+          import_line = "import RetroHostStatus from './src/components/host/RetroHostStatus';\n"
+          anchor = "import PlaylistPanel from './src/components/host/PlaylistPanel';\n"
+          if import_line not in text:
+              if anchor not in text:
+                  raise SystemExit('PlaylistPanel import anchor not found')
+              text = text.replace(anchor, anchor + import_line, 1)
+
+          pattern = re.compile(
+              r"  const renderStatusPanel = \(\) => \{.*?\n  \};\n\n  const selectedTrackReadyForPlayback =",
+              re.S,
+          )
+          replacement = """  const renderStatusPanel = () => {\n    const isHosting =\n      status.toLowerCase().includes('hosting') ||\n      status.toLowerCase().includes('server') ||\n      status.toLowerCase().includes('listening');\n\n    return (\n      <RetroHostStatus\n        partyCode={partyCode}\n        hostLocalIp={hostLocalIp}\n        nodeCount={nodeCount}\n        status={status}\n        isHosting={isHosting}\n        onStartHosting={startHostServer}\n      />\n    );\n  };\n\n  const selectedTrackReadyForPlayback ="""
+
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'Expected one renderStatusPanel replacement, got {count}')
+
+          path.write_text(text)
+          PY
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/apply-retro-host-deck.yml
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add App.tsx .github/workflows/apply-retro-host-deck.yml
+          git commit -m "Replace host status with retro hi-fi deck"
+          git push origin redesign/retro-hifi
