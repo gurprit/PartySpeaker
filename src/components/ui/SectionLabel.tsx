@@ -12,11 +12,14 @@ export default function SectionLabel({children}: Props) {
 
 const styles = StyleSheet.create({
   label: {
-    color: partyTheme.muted,
-    fontSize: 14,
-    fontWeight: '800',
-    letterSpacing: 1.1,
+    color: partyTheme.accentSoft,
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 1.8,
     textTransform: 'uppercase',
     marginBottom: 12,
+    fontFamily: 'monospace',
+    textShadowColor: partyTheme.accentDim,
+    textShadowRadius: 7,
   },
 });
