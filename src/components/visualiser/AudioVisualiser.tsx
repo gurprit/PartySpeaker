@@ -5,6 +5,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
+import {partyTheme} from '../ui/PartyTheme';
 
 const BAR_COUNT = 28;
 const QUIET_BARS = Array.from({length: BAR_COUNT}, () => 0.035);
@@ -38,15 +39,30 @@ export default function AudioVisualiser() {
 
   return (
     <View style={styles.wrapper}>
+      <View style={styles.scanline} />
       <View style={styles.visualiser}>
         {bars.map((level, index) => (
           <View
-            key={index}
+            key={`main-${index}`}
             style={[
               styles.bar,
               {
-                height: 5 + level * 92,
-                opacity: 0.45 + level * 0.55,
+                height: 8 + level * 92,
+                opacity: 0.52 + level * 0.48,
+              },
+            ]}
+          />
+        ))}
+      </View>
+      <View style={styles.reflection}>
+        {bars.map((level, index) => (
+          <View
+            key={`reflection-${index}`}
+            style={[
+              styles.reflectionBar,
+              {
+                height: 4 + level * 28,
+                opacity: 0.08 + level * 0.2,
               },
             ]}
           />
@@ -59,23 +75,65 @@ export default function AudioVisualiser() {
 const styles = StyleSheet.create({
   wrapper: {
     width: '100%',
-    marginTop: 20,
+    marginTop: 18,
     marginBottom: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: partyTheme.accentDim,
+    backgroundColor: '#090508',
+    paddingHorizontal: 8,
+    paddingTop: 10,
+    paddingBottom: 8,
+    overflow: 'hidden',
+    shadowColor: partyTheme.accent,
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  scanline: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 108,
+    height: 1,
+    backgroundColor: partyTheme.accentDim,
+    opacity: 0.7,
   },
   visualiser: {
-    height: 102,
+    height: 100,
     width: '100%',
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
     gap: 3,
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
   },
   bar: {
     flex: 1,
-    maxWidth: 10,
+    maxWidth: 9,
     minWidth: 3,
-    borderRadius: 999,
-    backgroundColor: '#f3f3f3',
+    borderRadius: 2,
+    backgroundColor: partyTheme.accent,
+    shadowColor: partyTheme.accent,
+    shadowOpacity: 0.85,
+    shadowRadius: 5,
+    elevation: 2,
+  },
+  reflection: {
+    height: 34,
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 3,
+    paddingHorizontal: 2,
+    transform: [{scaleY: -1}],
+  },
+  reflectionBar: {
+    flex: 1,
+    maxWidth: 9,
+    minWidth: 3,
+    borderRadius: 2,
+    backgroundColor: partyTheme.accentSoft,
   },
 });
