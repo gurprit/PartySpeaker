@@ -1522,7 +1522,7 @@ export default function App() {
     // but every actual playlist transition uses the same strict all-speaker
     // readiness barrier as a cold start. Re-enable the standby fast path only
     // after it independently proves identical start timing across devices.
-    if (false && standbyReadyEverywhere) {
+    if (Boolean(0) && standbyReadyEverywhere) {
       if (nowPlayingBroadcastTimerRef.current) {
         clearInterval(nowPlayingBroadcastTimerRef.current);
         nowPlayingBroadcastTimerRef.current = null;
